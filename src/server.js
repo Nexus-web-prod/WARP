@@ -86,7 +86,7 @@ function createWarpServer() {
     if (req.method === 'GET' && pathname === '/browser-test') {
       res.writeHead(200, {
         'Content-Type': 'text/html; charset=utf-8',
-        'Content-Security-Policy': "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self' ws:; frame-src 'self'"
+        'Content-Security-Policy': "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self' ws:; frame-src 'self' https://poki.com https://*.poki.com"
       });
       res.end(`<!doctype html>
 <html lang="en">
