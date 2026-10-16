@@ -78,130 +78,111 @@ function createWarpServer() {
     }
 
     if (req.method === 'GET' && pathname === '/browser-test') {
-      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Content-Security-Policy': "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src ws:" });
+      res.writeHead(200, {
+        'Content-Type': 'text/html; charset=utf-8',
+        'Content-Security-Policy': "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src ws:; frame-src http: https:"
+      });
       res.end(`<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>WARP TCP Browser Test</title>
+<title>WARP Browser</title>
 <style>
-body{font:16px system-ui,sans-serif;max-width:900px;margin:32px auto;padding:0 16px;color:#222}
-button{padding:7px 12px}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#f4f4f4;padding:12px;min-height:120px}
+:root{color-scheme:dark;font:14px system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#101114;color:#f3f4f6}
+*{box-sizing:border-box}
+html,body{height:100%;width:100%;margin:0;overflow:hidden}
+body{display:flex;flex-direction:column}
+.topbar{display:flex;align-items:center;gap:10px;padding:12px;background:#191a20;border-bottom:1px solid #30313a}
+.brand{font-weight:750;letter-spacing:.04em;white-space:nowrap}
+.controls{display:flex;gap:6px}
+button{border:1px solid #41424d;border-radius:8px;background:#252630;color:#f3f4f6;padding:9px 12px;font:inherit;cursor:pointer}
+button:hover{background:#333542}
+button:disabled{opacity:.45;cursor:default}
+#address{flex:1;min-width:40px;border:1px solid #41424d;border-radius:9px;background:#101116;color:#fff;padding:10px 12px;font:inherit;outline:none}
+#address:focus{border-color:#8b8df6}
+#go{background:#5b5ee5;border-color:#5b5ee5;font-weight:650}
+.notice{font-size:12px;color:#c4c5cf;background:#202129;padding:7px 14px;border-bottom:1px solid #30313a}
+#frame{flex:1;width:100%;height:100%;border:0;background:#fff}
+#blocked{display:none;padding:20px;background:#202129;color:#ddd}
+@media(max-width:650px){.topbar{gap:6px;padding:8px}.brand{display:none}.controls{gap:4px}button{padding:9px}.notice{font-size:11px}}
 </style>
 </head>
 <body>
-<h1>WARP TCP test</h1>
-<p>This sends one HTTP request through WARP's Wisp TCP relay. It is a transport test, not a web proxy; it does not rewrite or render remote websites.</p>
-<button id="run">Request example.com over WARP</button>
-<p id="status">Ready.</p>
-<pre id="output">Click the button to test TCP forwarding from this browser.</pre>
+<header class="topbar">
+  <div class="brand">WARP</div>
+  <div class="controls">
+    <button id="back" title="Back" aria-label="Back">←</button>
+    <button id="forward" title="Forward" aria-label="Forward">→</button>
+    <button id="reload" title="Reload" aria-label="Reload">↻</button>
+  </div>
+  <input id="address" type="text" value="https://example.com/" aria-label="Website address" autocomplete="url" spellcheck="false">
+  <button id="go">Go</button>
+</header>
+<div class="notice">Full-size website iframe. Some websites block embedding. This direct iframe does not tunnel page resources through WARP; use the Wisp TCP test below to verify the relay itself.</div>
+<iframe id="frame" title="Website view" src="https://example.com/" referrerpolicy="no-referrer" allow="fullscreen; autoplay; clipboard-read; clipboard-write"></iframe>
+<section id="blocked" aria-live="polite">If the page stays blank or shows a refusal, the website may block iframe embedding. This browser view does not bypass those restrictions.</section>
 <script>
 (() => {
-  const status = document.getElementById('status');
-  const output = document.getElementById('output');
-  const button = document.getElementById('run');
-  const encoder = new TextEncoder();
-  const decoder = new TextDecoder();
-  const streamId = 17;
-  let ws;
-  let response = '';
-  let done = false;
-  let timeout;
+  const address = document.getElementById('address');
+  const frame = document.getElementById('frame');
+  const history = [];
+  let index = -1;
 
-  function packet(type, id, payload = new Uint8Array()) {
-    const bytes = new Uint8Array(5 + payload.length);
-    const view = new DataView(bytes.buffer);
-    bytes[0] = type;
-    view.setUint32(1, id, true);
-    bytes.set(payload, 5);
-    return bytes;
-  }
-
-  function finish(message) {
-    if (done) return;
-    done = true;
-    clearTimeout(timeout);
-    status.textContent = message;
-    button.disabled = false;
-    if (ws && ws.readyState < WebSocket.CLOSING) ws.close();
-  }
-
-  button.addEventListener('click', () => {
-    button.disabled = true;
-    response = '';
-    done = false;
-    output.textContent = '';
-    status.textContent = 'Connecting to local WARP relay…';
-
+  function normalize(value) {
+    let text = value.trim();
+    if (!text) return null;
+    if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(text)) {
+      text = /^[^\s.]+$/.test(text) && !text.includes('localhost')
+        ? 'https://www.google.com/search?q=' + encodeURIComponent(text)
+        : 'https://' + text;
+    }
     try {
-      ws = new WebSocket('ws://' + location.host + '/wisp/', 'wisp-v2');
-      ws.binaryType = 'arraybuffer';
-    } catch (error) {
-      finish('Failed to create WebSocket: ' + error.message);
+      const url = new URL(text);
+      if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
+      return url.href;
+    } catch {
+      return null;
+    }
+  }
+
+  function navigate(value, record = true) {
+    const url = normalize(value);
+    if (!url) {
+      address.setCustomValidity('Enter a valid http:// or https:// website address.');
+      address.reportValidity();
+      address.setCustomValidity('');
       return;
     }
+    address.value = url;
+    frame.src = url;
+    if (record) {
+      history.splice(index + 1);
+      history.push(url);
+      index = history.length - 1;
+    }
+    document.getElementById('back').disabled = index <= 0;
+    document.getElementById('forward').disabled = index >= history.length - 1;
+  }
 
-    timeout = setTimeout(() => finish('Timed out waiting for the HTTP response.'), 12000);
-
-    ws.addEventListener('open', () => {
-      status.textContent = 'WebSocket connected; negotiating Wisp…';
-    });
-
-    ws.addEventListener('message', (event) => {
-      if (!(event.data instanceof ArrayBuffer)) return;
-      const bytes = new Uint8Array(event.data);
-      if (bytes.length < 5) return;
-      const view = new DataView(event.data);
-      const type = bytes[0];
-      const id = view.getUint32(1, true);
-      const payload = bytes.subarray(5);
-
-      // Wisp v2 INFO handshake.
-      if (type === 5 && id === 0) {
-        ws.send(packet(5, 0, new Uint8Array([2, 0])));
-        status.textContent = 'Wisp connected; opening example.com:80…';
-        return;
-      }
-
-      if (type === 3 && id === 0) {
-        // The relay has granted initial connection credit.
-        const host = encoder.encode('example.com');
-        const connect = new Uint8Array(3 + host.length);
-        connect[0] = 1; // TCP
-        new DataView(connect.buffer).setUint16(1, 80, true);
-        connect.set(host, 3);
-        ws.send(packet(1, streamId, connect));
-        ws.send(packet(2, streamId, encoder.encode(
-          'GET / HTTP/1.1\\r\\nHost: example.com\\r\\nConnection: close\\r\\n\\r\\n'
-        )));
-        status.textContent = 'HTTP request sent through WARP; waiting for response…';
-        return;
-      }
-
-      if (id === streamId && type === 4) {
-        const match = response.match(/^HTTP\\/\\d(?:\\.\\d)?\\s+(\\d+)/);
-        finish(match && match[1] === '200'
-          ? 'PASS — WARP returned HTTP 200 from example.com. Full raw response shown below.'
-          : 'TCP stream closed. Inspect the response above for the HTTP status.');
-        return;
-      }
-
-      if (id === streamId && type === 2 && payload.length) {
-        response += decoder.decode(payload, { stream: true });
-        output.textContent = response;
-        if (/\\r\\n\\r\\n/.test(response)) {
-          const match = response.match(/^HTTP\\/\\d(?:\\.\\d)?\\s+(\\d+)/);
-          if (match) status.textContent = 'Received HTTP response: ' + match[0] + ' (waiting for stream to finish; raw response shown below).';
-        }
-      }
-    });
-
-    ws.addEventListener('error', () => finish('WebSocket error. Check that WARP is running on this same port.'));
-    ws.addEventListener('close', () => {
-      if (!done) finish(response ? 'Connection closed; partial response shown.' : 'Connection closed before a response arrived.');
-    });
+  document.getElementById('go').addEventListener('click', () => navigate(address.value));
+  address.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') navigate(address.value);
   });
+  document.getElementById('reload').addEventListener('click', () => {
+    try { frame.contentWindow.location.reload(); } catch { frame.src = frame.src; }
+  });
+  document.getElementById('back').addEventListener('click', () => {
+    if (index > 0) navigate(history[--index], false);
+    document.getElementById('back').disabled = index <= 0;
+    document.getElementById('forward').disabled = index >= history.length - 1;
+  });
+  document.getElementById('forward').addEventListener('click', () => {
+    if (index < history.length - 1) navigate(history[++index], false);
+    document.getElementById('back').disabled = index <= 0;
+    document.getElementById('forward').disabled = index >= history.length - 1;
+  });
+  navigate('https://example.com/');
 })();
 </script>
 </body>
@@ -215,6 +196,7 @@ button{padding:7px 12px}pre{white-space:pre-wrap;overflow-wrap:anywhere;backgrou
         'WARP local development relay\n' +
         'Health: /health\n' +
         'WebSocket: /wisp/\n' +
+        'Browser: /browser-test\n' +
         'Protocol: Wisp v1/v2\n' +
         'TCP forwarding: enabled for permitted public destinations\n' +
         'UDP forwarding: disabled\n' +
