@@ -1,6 +1,7 @@
 'use strict';
 
 const http = require('node:http');
+const { handleWebProxy } = require('./web-proxy');
 const { server: wisp, logging } = require('@mercuryworkshop/wisp-js/server');
 
 const HOST = process.env.WARP_HOST || '127.0.0.1';
@@ -77,10 +78,15 @@ function createWarpServer() {
       return;
     }
 
+    if ((req.method === 'GET' || req.method === 'HEAD') && pathname === '/proxy') {
+      void handleWebProxy(req, res);
+      return;
+    }
+
     if (req.method === 'GET' && pathname === '/browser-test') {
       res.writeHead(200, {
         'Content-Type': 'text/html; charset=utf-8',
-        'Content-Security-Policy': "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src ws:; frame-src http: https:"
+        'Content-Security-Policy': "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self' ws:; frame-src 'self'"
       });
       res.end(`<!doctype html>
 <html lang="en">
@@ -119,9 +125,9 @@ button:disabled{opacity:.45;cursor:default}
   <input id="address" type="text" value="https://example.com/" aria-label="Website address" autocomplete="url" spellcheck="false">
   <button id="go">Go</button>
 </header>
-<div class="notice">Full-size website iframe. Some websites block embedding. This direct iframe does not tunnel page resources through WARP. It displays sites that permit iframe embedding.</div>
-<iframe id="frame" title="Website view" src="https://example.com/" referrerpolicy="no-referrer" allow="fullscreen; autoplay; clipboard-read; clipboard-write"></iframe>
-<section id="blocked" aria-live="polite">If the page stays blank or shows a refusal, the website may block iframe embedding. This browser view does not bypass those restrictions.</section>
+<div class="notice">WARP local browser proxy. Pages and common assets are fetched through the local WARP server; compatibility varies by site.</div>
+<iframe id="frame" title="Website view" src="/proxy?url=https%3A%2F%2Fexample.com%2F" referrerpolicy="no-referrer" allow="fullscreen; autoplay; clipboard-read; clipboard-write"></iframe>
+<section id="blocked" aria-live="polite">If a site still fails, it may use browser features this compatibility proxy cannot reproduce.</section>
 <script>
 (() => {
   const address = document.getElementById('address');
@@ -155,7 +161,7 @@ button:disabled{opacity:.45;cursor:default}
       return;
     }
     address.value = url;
-    frame.src = url;
+    frame.src = '/proxy?url=' + encodeURIComponent(url);
     if (record) {
       history.splice(index + 1);
       history.push(url);
