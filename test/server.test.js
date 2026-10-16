@@ -168,6 +168,8 @@ test('Poki URLs preserve SPA paths on the local virtual host', () => {
   );
   assert.ok(html.includes('href="http://poki.localhost:8787/en/games/example"'), 'Poki navigation paths must remain visible to its SPA router');
   assert.ok(html.includes('const localPokiOrigin = "http://poki.localhost:8787"'), 'The bootstrap must know the local virtual origin');
+  assert.ok(html.includes("host.endsWith('.poki.com')"), 'Dynamic URL rewriting must recognize Poki subdomains');
+  assert.ok(html.includes("host.slice(0, -'.poki.com'.length) + '.poki.localhost'"), 'Dynamic URLs must retain the corresponding local subdomain');
   const css = rewriteCss('body{background:url("/assets/bg.webp")}', 'https://www.poki.com/css/site.css', 'http://poki.localhost:8787');
   assert.ok(css.includes('http://poki.localhost:8787/assets/bg.webp'), 'Same-origin Poki CSS assets must preserve their paths');
 
