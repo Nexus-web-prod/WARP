@@ -63,7 +63,19 @@ async function validateTarget(input) {
 
 function isPokiHost(hostname) {
   const host = String(hostname || '').toLowerCase();
-  return host === 'poki.com' || host === 'www.poki.com';
+  return host === 'poki.com' || host === 'www.poki.com' || host.endsWith('.poki.com');
+}
+
+function localPokiUrl(resolved, localPokiOrigin) {
+  const local = new URL(localPokiOrigin);
+  const host = resolved.hostname.toLowerCase();
+  local.hostname = host === 'poki.com' || host === 'www.poki.com'
+    ? 'poki.localhost'
+    : host.slice(0, -'.poki.com'.length) + '.poki.localhost';
+  local.pathname = resolved.pathname;
+  local.search = resolved.search;
+  local.hash = resolved.hash;
+  return local.href;
 }
 
 function proxyUrl(value, base, localPokiOrigin = null) {
@@ -73,7 +85,7 @@ function proxyUrl(value, base, localPokiOrigin = null) {
     const source = new URL(base);
     // Keep Poki's real URL path visible to its SPA router through a local virtual host.
     if (localPokiOrigin && isPokiHost(source.hostname) && isPokiHost(resolved.hostname)) {
-      return localPokiOrigin + resolved.pathname + resolved.search + resolved.hash;
+      return localPokiUrl(resolved, localPokiOrigin);
     }
     return '/proxy?url=' + encodeURIComponent(resolved.href) + '&referer=' + encodeURIComponent(source.href);
   } catch { return value; }
@@ -131,7 +143,21 @@ function rewriteHtml(html, base, localPokiOrigin = null) {
 (() => {
   const originalBase = ${JSON.stringify(base)};
   const localPokiOrigin = ${JSON.stringify(localPokiOrigin)};
-  const isPokiHost = (hostname) => /^(www\\.)?poki\\.com$/i.test(hostname || '');
+  const isPokiHost = (hostname) => {
+    const host = String(hostname || '').toLowerCase();
+    return host === 'poki.com' || host === 'www.poki.com' || host.endsWith('.poki.com');
+  };
+  const localPokiUrl = (u) => {
+    const local = new URL(localPokiOrigin);
+    const host = u.hostname.toLowerCase();
+    local.hostname = host === 'poki.com' || host === 'www.poki.com'
+      ? 'poki.localhost'
+      : host.slice(0, -'.poki.com'.length) + '.poki.localhost';
+    local.pathname = u.pathname;
+    local.search = u.search;
+    local.hash = u.hash;
+    return local.href;
+  };
   const proxy = (value) => {
     const raw = typeof value === 'string' ? value : value.url;
     if (typeof raw !== 'string' || /^(#|data:|blob:|javascript:|mailto:|tel:|about:)/i.test(raw)) return value;
@@ -144,7 +170,7 @@ function rewriteHtml(html, base, localPokiOrigin = null) {
       const u = new URL(raw, originalBase);
       if (u.protocol !== 'http:' && u.protocol !== 'https:') return value;
       if (localPokiOrigin && isPokiHost(new URL(originalBase).hostname) && isPokiHost(u.hostname)) {
-        return localPokiOrigin + u.pathname + u.search + u.hash;
+        return localPokiUrl(u);
       }
       return '/proxy?url=' + encodeURIComponent(u.href) + '&referer=' + encodeURIComponent(originalBase);
     } catch { return value; }
@@ -235,14 +261,25 @@ async function readRequestBody(req, limit) {
 }
 
 async function handlePokiPathProxy(req, res) {
+  const requestHost = String(req.headers.host || '').split(':')[0].toLowerCase();
+  let upstreamHost;
+  if (requestHost === 'poki.localhost') {
+    upstreamHost = 'www.poki.com';
+  } else if (requestHost.endsWith('.poki.localhost')) {
+    upstreamHost = requestHost.slice(0, -'.localhost'.length) + '.com';
+  } else {
+    res.writeHead(400, { 'Content-Type': 'text/plain; charset=utf-8' }).end('Invalid Poki host.');
+    return;
+  }
+
   let target;
   try {
-    target = new URL(req.url, 'https://www.poki.com');
+    target = new URL(req.url, 'https://' + upstreamHost);
   } catch {
     res.writeHead(400, { 'Content-Type': 'text/plain; charset=utf-8' }).end('Invalid Poki path.');
     return;
   }
-  if (target.origin !== 'https://www.poki.com') {
+  if (target.origin !== 'https://' + upstreamHost || !isPokiHost(target.hostname)) {
     res.writeHead(400, { 'Content-Type': 'text/plain; charset=utf-8' }).end('Invalid Poki path.');
     return;
   }
