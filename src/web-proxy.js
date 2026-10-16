@@ -143,6 +143,44 @@ function rewriteHtml(html, base, localPokiOrigin = null) {
 (() => {
   const originalBase = ${JSON.stringify(base)};
   const localPokiOrigin = ${JSON.stringify(localPokiOrigin)};
+  // Send the upstream URL to the WARP chrome. The parent verifies both this
+  // iframe's window identity and the local virtual-host origin before accepting it.
+  const reportNavigation = (mode = 'replace') => {
+    try {
+      const upstream = new URL(location.href);
+      if (localPokiOrigin && (upstream.hostname === 'poki.localhost' || upstream.hostname.endsWith('.poki.localhost'))) {
+        upstream.protocol = 'https:';
+        upstream.hostname = upstream.hostname === 'poki.localhost'
+          ? 'www.poki.com'
+          : upstream.hostname.slice(0, -'.poki.localhost'.length) + '.poki.com';
+      } else if (location.origin === new URL(originalBase).origin && location.pathname === '/proxy') {
+        const target = new URL(location.href).searchParams.get('url');
+        if (target) upstream.href = target;
+      } else {
+        upstream.href = originalBase;
+        upstream.pathname = location.pathname;
+        upstream.search = location.search;
+        upstream.hash = location.hash;
+      }
+      parent.postMessage({ type: 'warp:navigate', url: upstream.href, mode }, '*');
+    } catch { /* A URL that cannot be reported must not interrupt the site. */ }
+  };
+  const originalPushState = history.pushState.bind(history);
+  history.pushState = function(...args) {
+    const result = originalPushState(...args);
+    reportNavigation('push');
+    return result;
+  };
+  const originalReplaceState = history.replaceState.bind(history);
+  history.replaceState = function(...args) {
+    const result = originalReplaceState(...args);
+    reportNavigation('replace');
+    return result;
+  };
+  addEventListener('popstate', () => reportNavigation('replace'));
+  addEventListener('hashchange', () => reportNavigation('push'));
+  addEventListener('load', () => reportNavigation('replace'));
+  reportNavigation('replace');
   const isPokiHost = (hostname) => {
     const host = String(hostname || '').toLowerCase();
     return host === 'poki.com' || host === 'www.poki.com' || host.endsWith('.poki.com');
