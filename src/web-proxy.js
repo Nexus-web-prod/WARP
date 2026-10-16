@@ -78,6 +78,25 @@ function localPokiUrl(resolved, localPokiOrigin) {
   return local.href;
 }
 
+function upstreamPokiUrlFromLocal(value) {
+  try {
+    const url = new URL(value);
+    const host = url.hostname.toLowerCase();
+    if (host === 'poki.localhost') {
+      url.hostname = 'www.poki.com';
+    } else if (host.endsWith('.poki.localhost')) {
+      url.hostname = host.slice(0, -'.poki.localhost'.length) + '.poki.com';
+    } else {
+      return null;
+    }
+    url.protocol = 'https:';
+    url.port = '';
+    return url.href;
+  } catch {
+    return null;
+  }
+}
+
 function proxyUrl(value, base, localPokiOrigin = null) {
   try {
     const resolved = new URL(value, base);
@@ -402,11 +421,14 @@ async function handlePokiPathProxy(req, res) {
     return;
   }
   const forwarded = Object.create(req);
-  // Keep upstream requests looking like they originated from the real Poki page.
-  // Without a real Referer, Poki's game launcher/API can return its generic
-  // "page does not exist" response even though the game route itself is valid.
+  // Translate the browser's local virtual-host Referer back to the real Poki
+  // page. Do not invent a self-referer for the initial navigation: that changes
+  // the request semantics and can trigger upstream routing/anti-hotlink checks.
+  const upstreamReferer = req.headers.referer
+    ? upstreamPokiUrlFromLocal(req.headers.referer)
+    : null;
   forwarded.url = '/proxy?url=' + encodeURIComponent(target.href) +
-    '&referer=' + encodeURIComponent(target.href);
+    (upstreamReferer ? '&referer=' + encodeURIComponent(upstreamReferer) : '');
   return handleWebProxy(forwarded, res);
 }
 
@@ -450,6 +472,11 @@ async function handleWebProxy(req, res) {
           ...(req.headers['if-modified-since'] ? { 'If-Modified-Since': req.headers['if-modified-since'] } : {})
         }
       });
+      const requestHost = String(req.headers.host || '').split(':')[0].toLowerCase();
+      if (isPokiHost(target.hostname) || requestHost === 'poki.localhost' || requestHost.endsWith('.poki.localhost')) {
+        console.info('[WARP upstream]', req.method, target.origin + target.pathname,
+          '->', upstream.status, upstream.headers.get('content-type') || 'unknown content-type');
+      }
       if (![301, 302, 303, 307, 308].includes(upstream.status)) break;
       const location = upstream.headers.get('location');
       if (!location || redirects === MAX_REDIRECTS) break;
@@ -526,4 +553,4 @@ async function handleWebProxy(req, res) {
   }
 }
 
-module.exports = { handleWebProxy, handlePokiPathProxy, validateTarget, rewriteHtml, rewriteCss, proxyUrl };
+module.exports = { handleWebProxy, handlePokiPathProxy, validateTarget, rewriteHtml, rewriteCss, proxyUrl, upstreamPokiUrlFromLocal };
