@@ -117,6 +117,10 @@ test('GET /browser-test serves the WARP-proxied browser view', async () => {
     assert.ok(response.headers['content-security-policy'].includes('http://*.poki.localhost:' + new URL(baseUrl).port), 'The frame policy must permit path-preserving Poki subdomains');
     assert.ok(response.body.includes('<iframe id="frame"'));
     assert.ok(response.body.includes('id="address"'));
+    assert.ok(response.body.includes("event.source !== frame.contentWindow"), 'Address reports must be tied to the current iframe');
+    assert.ok(response.body.includes("event.data.type !== 'warp:navigate'"), 'Address reports must validate the message shape');
+    assert.ok(response.body.includes("syncAddress(current.searchParams.get('url'), 'replace')"), 'The address bar must unwrap proxy URLs to the full destination');
+    assert.ok(response.body.includes("event.data.mode === 'push' ? 'push' : 'replace'"), 'Reported SPA navigation must update address-bar history');
     assert.ok(response.body.includes('/proxy?url=https%3A%2F%2Fexample.com%2F'));
     assert.ok(response.body.includes("const localPoki = new URL(location.protocol + '//poki.localhost:' + location.port)"), 'Poki must use a path-preserving local origin');
     assert.ok(response.body.includes('frame.src = localPoki.href'), 'Poki routes must remain inside the WARP iframe');
@@ -174,6 +178,10 @@ test('Poki URLs preserve SPA paths on the local virtual host', () => {
   assert.ok(html.includes('const localPokiOrigin = "http://poki.localhost:8787"'), 'The bootstrap must know the local virtual origin');
   assert.ok(html.includes("host.endsWith('.poki.com')"), 'Dynamic URL rewriting must recognize Poki subdomains');
   assert.ok(html.includes("host.slice(0, -'.poki.com'.length) + '.poki.localhost'"), 'Dynamic URLs must retain the corresponding local subdomain');
+  assert.ok(html.includes("type: 'warp:navigate'"), 'Proxied pages must report their visible upstream URL');
+  assert.ok(html.includes('history.pushState = function'), 'SPA pushState routes must be reported');
+  assert.ok(html.includes("addEventListener('popstate'"), 'Back/forward SPA navigation must be reported');
+  assert.ok(html.includes("addEventListener('hashchange'"), 'Hash route changes must be reported');
   const css = rewriteCss('body{background:url("/assets/bg.webp")}', 'https://www.poki.com/css/site.css', 'http://poki.localhost:8787');
   assert.ok(css.includes('http://poki.localhost:8787/assets/bg.webp'), 'Same-origin Poki CSS assets must preserve their paths');
 
