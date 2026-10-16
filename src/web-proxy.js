@@ -83,13 +83,13 @@ function rewriteHtml(html, base) {
   // regexes can otherwise match text like "src=" inside script strings and
   // corrupt site bundles, causing SyntaxError and broken UI icons.
   const scriptBodies = [];
-  html = html.replace(/(<script\\b[^>]*>)([\\s\\S]*?)(<\\/script\\s*>)/gi,
+  html = html.replace(/(<script\b[^>]*>)([\s\S]*?)(<\/script\s*>)/gi,
     (_whole, opening, body, closing) => {
       const token = 'WARP_SCRIPT_BODY_' + scriptBodies.length + '_END';
       scriptBodies.push(body);
       return opening + token + closing;
     });
-  html = html.replace(/<base\\b[^>]*>/gi, '');
+  html = html.replace(/<base\b[^>]*>/gi, '');
   // Rewrite common URL-bearing attributes so resources and navigation stay
   // on the local origin. This is a compatibility proxy, not a full browser engine.
   html = html.replace(/\b(href|src|action|poster|data|formaction)\s*=\s*("([^"]*)"|'([^']*)'|([^\s>]+))/gi,
