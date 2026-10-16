@@ -193,8 +193,8 @@ async function handleWebProxy(req, res) {
       return;
     }
 
-    res.writeHead(upstream.status, headers);
     if (req.method === 'HEAD') {
+      res.writeHead(upstream.status, headers);
       res.end();
       return;
     }
@@ -203,6 +203,7 @@ async function handleWebProxy(req, res) {
       res.writeHead(413, { 'Content-Type': 'text/plain; charset=utf-8' }).end('Resource is too large for the local browser proxy.');
       return;
     }
+    res.writeHead(upstream.status, headers);
     res.end(bytes);
   } catch (error) {
     const status = /private destinations|Only HTTP|credentials/.test(error.message) ? 403 :
