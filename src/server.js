@@ -86,7 +86,7 @@ function createWarpServer() {
     if (req.method === 'GET' && pathname === '/browser-test') {
       res.writeHead(200, {
         'Content-Type': 'text/html; charset=utf-8',
-        'Content-Security-Policy': "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self' ws:; frame-src 'self' https://poki.com https://*.poki.com"
+        'Content-Security-Policy': "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self' ws:; frame-src 'self'"
       });
       res.end(`<!doctype html>
 <html lang="en">
@@ -162,12 +162,20 @@ button:disabled{opacity:.45;cursor:default}
     }
     address.value = url;
     const hostname = new URL(url).hostname.toLowerCase();
-    // Poki is a path-sensitive SPA: its router and game loader require the real
-    // /en/games/... URL and origin. Serving it under /proxy?url=... makes Poki
-    // interpret every route as missing. Use the native page only for Poki;
-    // all other sites continue through WARP's local compatibility proxy.
+    // Poki's own frame-ancestors policy rejects WARP's iframe. Open Poki as a
+    // top-level page instead; keep the WARP tab available when popups are allowed.
+    // If the browser blocks the new tab, navigate this tab directly as a fallback.
     const isPoki = hostname === 'poki.com' || hostname.endsWith('.poki.com');
-    frame.src = isPoki ? url : '/proxy?url=' + encodeURIComponent(url);
+    if (isPoki) {
+      const pokiWindow = window.open(url, '_blank');
+      if (pokiWindow) {
+        pokiWindow.opener = null;
+      } else {
+        window.location.assign(url);
+      }
+      return;
+    }
+    frame.src = '/proxy?url=' + encodeURIComponent(url);
     if (record) {
       history.splice(index + 1);
       history.push(url);
