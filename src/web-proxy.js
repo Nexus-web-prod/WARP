@@ -151,7 +151,11 @@ function rewriteHtml(html, base, localPokiOrigin = null) {
       const current = new URL(location.href);
       if (localPokiOrigin && (current.hostname === 'poki.localhost' || current.hostname.endsWith('.poki.localhost'))) {
         upstream = current;
+        // The local virtual host uses WARP's port (for example :8787), but
+        // the upstream Poki URL must use its normal HTTPS port, not that local
+        // development port. Changing protocol alone preserves :8787.
         upstream.protocol = 'https:';
+        upstream.port = '';
         upstream.hostname = upstream.hostname === 'poki.localhost'
           ? 'www.poki.com'
           : upstream.hostname.slice(0, -'.poki.localhost'.length) + '.poki.com';
