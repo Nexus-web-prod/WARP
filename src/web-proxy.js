@@ -475,7 +475,8 @@ async function handleWebProxy(req, res) {
       const requestHost = String(req.headers.host || '').split(':')[0].toLowerCase();
       if (isPokiHost(target.hostname) || requestHost === 'poki.localhost' || requestHost.endsWith('.poki.localhost')) {
         console.info('[WARP upstream]', req.method, target.origin + target.pathname,
-          '->', upstream.status, upstream.headers.get('content-type') || 'unknown content-type');
+          '->', upstream.status, upstream.headers.get('content-type') || 'unknown content-type',
+          'origin:', req.headers.origin || 'none');
       }
       if (![301, 302, 303, 307, 308].includes(upstream.status)) break;
       const location = upstream.headers.get('location');
@@ -490,6 +491,24 @@ async function handleWebProxy(req, res) {
       'X-Content-Type-Options': 'nosniff',
       'Referrer-Policy': 'no-referrer'
     };
+    // Poki is rewritten onto multiple *.poki.localhost virtual hosts. Browsers
+    // treat each subdomain as a distinct origin, so SDK/API responses must
+    // explicitly permit the requesting local Poki origin or fetch/script loads
+    // are blocked by CORS before the game can initialize.
+    const browserOrigin = req.headers.origin;
+    if (browserOrigin) {
+      try {
+        const originUrl = new URL(browserOrigin);
+        const originHost = originUrl.hostname.toLowerCase();
+        if ((originUrl.protocol === 'http:' || originUrl.protocol === 'https:') &&
+            (originHost === 'poki.localhost' || originHost.endsWith('.poki.localhost'))) {
+          headers['Access-Control-Allow-Origin'] = browserOrigin;
+          headers['Access-Control-Allow-Credentials'] = 'true';
+          headers['Vary'] = 'Origin';
+          headers['Access-Control-Expose-Headers'] = 'Content-Length, Content-Range, Accept-Ranges, ETag';
+        }
+      } catch { /* Ignore malformed Origin headers. */ }
+    }
     for (const name of ['content-range', 'accept-ranges', 'last-modified', 'etag', 'content-disposition']) {
       const value = upstream.headers.get(name);
       if (value) headers[name] = value;
