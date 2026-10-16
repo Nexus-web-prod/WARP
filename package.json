@@ -6,7 +6,7 @@
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
-    "check": "node --check src/server.js && node --check test/server.test.js",
+    "check": "node --check src/server.js && node --check src/web-proxy.js && node --check test/server.test.js",
     "test": "node --test"
   },
   "engines": {
