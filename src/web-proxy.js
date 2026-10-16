@@ -7,6 +7,7 @@ const { pipeline } = require('node:stream/promises');
 
 const MAX_REDIRECTS = 6;
 const MAX_BODY_BYTES = 20 * 1024 * 1024;
+const MAX_REQUEST_BODY_BYTES = 2 * 1024 * 1024;
 const PRIVATE_V4_CIDRS = [
   ['0.0.0.0', 8], ['10.0.0.0', 8], ['100.64.0.0', 10], ['127.0.0.0', 8],
   ['169.254.0.0', 16], ['172.16.0.0', 12], ['192.0.0.0', 24], ['192.0.2.0', 24],
@@ -154,9 +155,25 @@ function rewriteHtml(html, base) {
   return html;
 }
 
+async function readRequestBody(req, limit) {
+  const chunks = [];
+  let length = 0;
+  let tooLarge = false;
+  for await (const chunk of req) {
+    length += chunk.length;
+    if (length > limit) {
+      tooLarge = true;
+      continue;
+    }
+    chunks.push(chunk);
+  }
+  if (tooLarge) throw new Error('Request body is too large for the local browser proxy.');
+  return Buffer.concat(chunks, length);
+}
+
 async function handleWebProxy(req, res) {
-  if (req.method !== 'GET' && req.method !== 'HEAD') {
-    res.writeHead(405, { 'Content-Type': 'text/plain; charset=utf-8', Allow: 'GET, HEAD' }).end('Only GET and HEAD are supported by this browser proxy.');
+  if (!['GET', 'HEAD', 'POST'].includes(req.method)) {
+    res.writeHead(405, { 'Content-Type': 'text/plain; charset=utf-8', Allow: 'GET, HEAD, POST' }).end('Only GET, HEAD, and POST are supported by this browser proxy.');
     return;
   }
 
@@ -173,11 +190,13 @@ async function handleWebProxy(req, res) {
   }
 
   try {
+    const requestBody = req.method === 'POST' ? await readRequestBody(req, MAX_REQUEST_BODY_BYTES) : undefined;
     let target = await validateTarget(initial);
     let upstream;
     for (let redirects = 0; redirects <= MAX_REDIRECTS; redirects++) {
       upstream = await fetch(target, {
         method: req.method,
+        ...(requestBody !== undefined ? { body: requestBody } : {}),
         redirect: 'manual',
         signal: AbortSignal.timeout(20000),
         headers: {
@@ -185,6 +204,8 @@ async function handleWebProxy(req, res) {
           Accept: req.headers.accept || '*/*',
           'Accept-Language': req.headers['accept-language'] || 'en-US,en;q=0.9',
           ...(referer ? { Referer: referer } : {}),
+          ...(req.method === 'POST' && referer ? { Origin: new URL(referer).origin } : {}),
+          ...(req.headers['content-type'] ? { 'Content-Type': req.headers['content-type'] } : {}),
           ...(req.headers.range ? { Range: req.headers.range } : {}),
           ...(req.headers['if-none-match'] ? { 'If-None-Match': req.headers['if-none-match'] } : {}),
           ...(req.headers['if-modified-since'] ? { 'If-Modified-Since': req.headers['if-modified-since'] } : {})
@@ -248,7 +269,8 @@ async function handleWebProxy(req, res) {
       return;
     }
     const status = /private destinations|Only HTTP|credentials/.test(error.message) ? 403 :
-      /valid website URL|Missing url/.test(error.message) ? 400 : 502;
+      /valid website URL|Missing url/.test(error.message) ? 400 :
+      /Request body is too large/.test(error.message) ? 413 : 502;
     res.writeHead(status, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
     res.end('WARP could not load this site. ' + error.message);
   }
