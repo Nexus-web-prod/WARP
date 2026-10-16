@@ -87,7 +87,7 @@ function createWarpServer() {
       const localPort = new URL('http://' + (req.headers.host || ('127.0.0.1:' + PORT))).port || PORT;
       res.writeHead(200, {
         'Content-Type': 'text/html; charset=utf-8',
-        'Content-Security-Policy': "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self' ws:; frame-src 'self' http://poki.localhost:" + localPort
+        'Content-Security-Policy': "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self' ws:; frame-src 'self' http://poki.localhost:" + localPort + " http://*.poki.localhost:" + localPort
       });
       res.end(`<!doctype html>
 <html lang="en">
@@ -164,12 +164,16 @@ button:disabled{opacity:.45;cursor:default}
     address.value = url;
     const parsed = new URL(url);
     const hostname = parsed.hostname.toLowerCase();
-    // Poki requires path-preserving SPA routes. Route it through a dedicated
-    // localhost virtual host so its iframe sees /en/games/... while WARP strips
-    // Poki's upstream frame-ancestors policy. Do not open external tabs.
-    const isPoki = hostname === 'poki.com' || hostname === 'www.poki.com';
+    // Keep every Poki subdomain on a matching local virtual host. Game launches
+    // can cross from www.poki.com to another *.poki.com host; sending those
+    // routes through /proxy changes the origin/path the game's router expects.
+    // Never open external tabs.
+    const isPoki = hostname === 'poki.com' || hostname === 'www.poki.com' || hostname.endsWith('.poki.com');
     if (isPoki) {
       const localPoki = new URL(location.protocol + '//poki.localhost:' + location.port);
+      localPoki.hostname = hostname === 'poki.com' || hostname === 'www.poki.com'
+        ? 'poki.localhost'
+        : hostname.slice(0, -'.poki.com'.length) + '.poki.localhost';
       localPoki.pathname = parsed.pathname;
       localPoki.search = parsed.search;
       localPoki.hash = parsed.hash;
@@ -212,7 +216,7 @@ button:disabled{opacity:.45;cursor:default}
     }
 
     const requestHost = String(req.headers.host || '').split(':')[0].toLowerCase();
-    if (requestHost === 'poki.localhost') {
+    if (requestHost === 'poki.localhost' || requestHost.endsWith('.poki.localhost')) {
       void handlePokiPathProxy(req, res);
       return;
     }
