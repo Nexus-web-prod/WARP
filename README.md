@@ -31,7 +31,7 @@ WARP uses the maintained `@mercuryworkshop/wisp-js` implementation for Wisp v1/v
 - UDP forwarding: disabled in this milestone.
 - Private and loopback destination IPs: blocked by default.
 - Direct public IP destinations: allowed, subject to IP and port restrictions.
-- Limits: 64 streams per WebSocket and 8 streams per hostname.
+- Limit: 64 streams per WebSocket. The optional per-host limit is disabled because Wisp JS 0.5.0 has an object/iterable mismatch in that code path.
 - Common administration/service ports are blocked.
 - Browser WebSocket origins are restricted to localhost by default.
 - The HTTP service binds to localhost by default.
