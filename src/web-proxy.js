@@ -145,40 +145,44 @@ function rewriteHtml(html, base, localPokiOrigin = null) {
   const localPokiOrigin = ${JSON.stringify(localPokiOrigin)};
   // Send the upstream URL to the WARP chrome. The parent verifies both this
   // iframe's window identity and the local virtual-host origin before accepting it.
-  const reportNavigation = (mode = 'replace') => {
+  const reportNavigation = (mode = 'replace', value = null) => {
     try {
-      const upstream = new URL(location.href);
-      if (localPokiOrigin && (upstream.hostname === 'poki.localhost' || upstream.hostname.endsWith('.poki.localhost'))) {
+      let upstream = new URL(originalBase);
+      const current = new URL(location.href);
+      if (localPokiOrigin && (current.hostname === 'poki.localhost' || current.hostname.endsWith('.poki.localhost'))) {
+        upstream = current;
         upstream.protocol = 'https:';
         upstream.hostname = upstream.hostname === 'poki.localhost'
           ? 'www.poki.com'
           : upstream.hostname.slice(0, -'.poki.localhost'.length) + '.poki.com';
-      } else if (location.origin === new URL(originalBase).origin && location.pathname === '/proxy') {
-        const target = new URL(location.href).searchParams.get('url');
-        if (target) upstream.href = target;
-      } else {
-        upstream.href = originalBase;
-        upstream.pathname = location.pathname;
-        upstream.search = location.search;
-        upstream.hash = location.hash;
+      } else if (value !== null && value !== undefined && String(value)) {
+        const candidate = new URL(String(value), originalBase);
+        if (candidate.pathname === '/proxy' && candidate.searchParams.has('url')) {
+          upstream = new URL(candidate.searchParams.get('url'));
+        } else if (candidate.origin === location.origin) {
+          upstream = new URL(candidate.pathname + candidate.search + candidate.hash, originalBase);
+        } else {
+          upstream = candidate;
+        }
       }
+      if (!['http:', 'https:'].includes(upstream.protocol)) return;
       parent.postMessage({ type: 'warp:navigate', url: upstream.href, mode }, '*');
     } catch { /* A URL that cannot be reported must not interrupt the site. */ }
   };
   const originalPushState = history.pushState.bind(history);
-  history.pushState = function(...args) {
-    const result = originalPushState(...args);
-    reportNavigation('push');
+  history.pushState = function(state, title, url) {
+    const result = originalPushState(state, title, url);
+    reportNavigation('push', url == null ? null : url);
     return result;
   };
   const originalReplaceState = history.replaceState.bind(history);
-  history.replaceState = function(...args) {
-    const result = originalReplaceState(...args);
-    reportNavigation('replace');
+  history.replaceState = function(state, title, url) {
+    const result = originalReplaceState(state, title, url);
+    reportNavigation('replace', url == null ? null : url);
     return result;
   };
-  addEventListener('popstate', () => reportNavigation('replace'));
-  addEventListener('hashchange', () => reportNavigation('push'));
+  addEventListener('popstate', () => reportNavigation('replace', location.href));
+  addEventListener('hashchange', () => reportNavigation('push', location.href));
   addEventListener('load', () => reportNavigation('replace'));
   reportNavigation('replace');
   const isPokiHost = (hostname) => {
