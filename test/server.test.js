@@ -126,6 +126,16 @@ test('browser proxy rewrites common HTML and CSS resource URLs', () => {
   assert.ok(css.includes('/proxy?url=https%3A%2F%2Fexample.com%2Fcss%2Ftheme.css'));
 });
 
+test('browser proxy preserves CDN srcset URLs with commas and source referrers', () => {
+  const html = rewriteHtml(
+    '<html><body><img srcset="https://cdn.example/image.webp?format=webp,quality=80 1x, https://cdn.example/image@2x.webp 2x"></body></html>',
+    'https://www.poki.com/en/games/example'
+  );
+  assert.ok(html.includes('format%3Dwebp%2Cquality%3D80'));
+  assert.ok(html.includes('referer=https%3A%2F%2Fwww.poki.com%2Fen%2Fgames%2Fexample'));
+  assert.ok(html.includes('https%3A%2F%2Fcdn.example%2Fimage%402x.webp'));
+});
+
 test('unknown HTTP routes return 404', async () => {
   await withServer(async ({ baseUrl }) => {
     assert.equal((await get(`${baseUrl}/missing`)).status, 404);
