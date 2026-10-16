@@ -5,15 +5,25 @@ const net = require('node:net');
 
 const MAX_REDIRECTS = 6;
 const MAX_BODY_BYTES = 20 * 1024 * 1024;
-const PRIVATE_V4 = [
-  /^0\./, /^10\./, /^127\./, /^169\.254\./, /^172\.(1[6-9]|2\d|3[01])\./,
-  /^192\.168\./, /^192\.0\.0\./, /^192\.0\.2\./, /^198\.18\./, /^198\.19\./,
-  /^198\.51\.100\./, /^203\.0\.113\./, /^22[4-9]\./, /^23\d\./, /^24\d\./, /^25[0-5]\./
+const PRIVATE_V4_CIDRS = [
+  ['0.0.0.0', 8], ['10.0.0.0', 8], ['100.64.0.0', 10], ['127.0.0.0', 8],
+  ['169.254.0.0', 16], ['172.16.0.0', 12], ['192.0.0.0', 24], ['192.0.2.0', 24],
+  ['192.88.99.0', 24], ['192.168.0.0', 16], ['198.18.0.0', 15],
+  ['198.51.100.0', 24], ['203.0.113.0', 24], ['224.0.0.0', 4], ['240.0.0.0', 4]
 ];
+
+function ipv4Number(address) {
+  return address.split('.').reduce((value, part) => (value * 256) + Number(part), 0) >>> 0;
+}
+
+function isInIpv4Range(address, network, prefix) {
+  const shift = 32 - prefix;
+  return (ipv4Number(address) >>> shift) === (ipv4Number(network) >>> shift);
+}
 
 function isPublicAddress(address) {
   const version = net.isIP(address);
-  if (version === 4) return !PRIVATE_V4.some((pattern) => pattern.test(address));
+  if (version === 4) return !PRIVATE_V4_CIDRS.some(([network, prefix]) => isInIpv4Range(address, network, prefix));
   if (version === 6) {
     const value = address.toLowerCase();
     // Permit globally routable IPv6 only; reject loopback, unspecified,
