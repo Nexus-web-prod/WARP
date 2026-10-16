@@ -20,15 +20,15 @@ By default the server binds to `127.0.0.1:8787`.
 
 - Health: http://127.0.0.1:8787/health
 - Wisp WebSocket: ws://127.0.0.1:8787/wisp/
-- Browser TCP test: http://127.0.0.1:8787/browser-test
+- Browser view: http://127.0.0.1:8787/browser-test
 
 Set `PORT` to change the port. Set `WARP_HOST` to change the bind address.
 
-## Browser TCP test
+## Browser view
 
-With `npm start` running, open http://127.0.0.1:8787/browser-test and click **Request example.com over WARP**. The page opens a local WebSocket to WARP, performs the Wisp v2 handshake, requests `example.com:80` over a TCP stream, and displays the raw HTTP response returned by that connection. This validates browser-to-WARP TCP forwarding without rewriting pages or acting as a web proxy.
+With `npm start` running, open http://127.0.0.1:8787/browser-test. The page provides a full-size iframe with an address field and back, forward, reload, and Go controls. It can render full HTML/CSS/images/JavaScript for websites that allow embedding.
 
-This is intentionally a transport diagnostic, **not** a full website renderer. Rendering arbitrary websites through a relay would require an additional browser proxy/transport layer, which this project does not add.
+**Important:** This is a direct iframe, not a web proxy. Website resources load directly from the destination and do not travel through WARP's Wisp TCP relay. Some sites deliberately block iframe embedding with their own security headers; this page does not bypass those restrictions. The Wisp relay itself remains available at `/wisp/` and `/health`, but a browser-side networking integration is needed to route a full website through WARP.
 
 ## Current implementation
 
