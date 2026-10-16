@@ -136,6 +136,28 @@ button:disabled{opacity:.45;cursor:default}
   const history = [];
   let index = -1;
 
+  function syncAddress(value, mode = 'replace') {
+    let url;
+    try {
+      url = new URL(value);
+      if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) return;
+    } catch { return; }
+    const fullUrl = url.href;
+    address.value = fullUrl;
+    if (mode === 'push' && history[index] !== fullUrl) {
+      history.splice(index + 1);
+      history.push(fullUrl);
+      index = history.length - 1;
+    } else if (index >= 0) {
+      history[index] = fullUrl;
+    } else {
+      history.push(fullUrl);
+      index = 0;
+    }
+    document.getElementById('back').disabled = index <= 0;
+    document.getElementById('forward').disabled = index >= history.length - 1;
+  }
+
   function normalize(value) {
     let text = value.trim();
     if (!text) return null;
@@ -189,6 +211,47 @@ button:disabled{opacity:.45;cursor:default}
     document.getElementById('back').disabled = index <= 0;
     document.getElementById('forward').disabled = index >= history.length - 1;
   }
+
+  // Proxied documents report their upstream URL; only accept messages from this
+  // iframe and from this local WARP origin or its same-port Poki virtual hosts.
+  window.addEventListener('message', (event) => {
+    if (event.source !== frame.contentWindow || !event.data ||
+        event.data.type !== 'warp:navigate' || typeof event.data.url !== 'string' ||
+        event.data.url.length > 8192) return;
+    let source;
+    let destination;
+    try {
+      source = new URL(event.origin);
+      destination = new URL(event.data.url);
+    } catch { return; }
+    const localHost = (host) => host === 'localhost' || host === '127.0.0.1' ||
+      host === '[::1]' || host === '::1';
+    const pokiHost = (host) => host === 'poki.localhost' || host.endsWith('.poki.localhost');
+    const localPort = location.port || (location.protocol === 'https:' ? '443' : '80');
+    if (source.port !== localPort ||
+        !(event.origin === location.origin || (source.protocol === location.protocol && pokiHost(source.hostname))) ||
+        !['http:', 'https:'].includes(destination.protocol) ||
+        destination.username || destination.password) return;
+    syncAddress(destination.href, event.data.mode === 'push' ? 'push' : 'replace');
+  });
+
+  frame.addEventListener('load', () => {
+    // Same-origin proxy responses may not run injected reporting (binary/error
+    // pages), so unwrap their requested URL as a useful fallback.
+    try {
+      const current = new URL(frame.contentWindow.location.href);
+      if (current.pathname === '/proxy' && current.searchParams.has('url')) {
+        syncAddress(current.searchParams.get('url'), 'replace');
+      } else if (current.hostname === 'poki.localhost' || current.hostname.endsWith('.poki.localhost')) {
+        const upstream = new URL(current.href);
+        upstream.protocol = 'https:';
+        upstream.hostname = current.hostname === 'poki.localhost'
+          ? 'www.poki.com'
+          : current.hostname.slice(0, -'.poki.localhost'.length) + '.poki.com';
+        syncAddress(upstream.href, 'replace');
+      }
+    } catch { /* Poki's virtual host is intentionally cross-origin to the UI. */ }
+  });
 
   document.getElementById('go').addEventListener('click', () => navigate(address.value));
   address.addEventListener('keydown', (event) => {
