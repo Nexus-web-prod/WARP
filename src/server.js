@@ -119,7 +119,7 @@ button:disabled{opacity:.45;cursor:default}
   <input id="address" type="text" value="https://example.com/" aria-label="Website address" autocomplete="url" spellcheck="false">
   <button id="go">Go</button>
 </header>
-<div class="notice">Full-size website iframe. Some websites block embedding. This direct iframe does not tunnel page resources through WARP; use the Wisp TCP test below to verify the relay itself.</div>
+<div class="notice">Full-size website iframe. Some websites block embedding. This direct iframe does not tunnel page resources through WARP. It displays sites that permit iframe embedding.</div>
 <iframe id="frame" title="Website view" src="https://example.com/" referrerpolicy="no-referrer" allow="fullscreen; autoplay; clipboard-read; clipboard-write"></iframe>
 <section id="blocked" aria-live="polite">If the page stays blank or shows a refusal, the website may block iframe embedding. This browser view does not bypass those restrictions.</section>
 <script>
