@@ -178,7 +178,7 @@ async function handleWebProxy(req, res) {
     const type = upstream.headers.get('content-type') || 'application/octet-stream';
     const headers = {
       'Content-Type': type,
-      'Cache-Control': /text\\/html|text\\/css/i.test(type) ? 'no-store' : 'public, max-age=300',
+      'Cache-Control': /text\/html|text\/css/i.test(type) ? 'no-store' : 'public, max-age=300',
       'X-Content-Type-Options': 'nosniff',
       'Referrer-Policy': 'no-referrer'
     };
