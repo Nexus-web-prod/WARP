@@ -5,7 +5,6 @@ const { server: wisp, logging } = require('@mercuryworkshop/wisp-js/server');
 
 const HOST = process.env.WARP_HOST || '127.0.0.1';
 const PORT = Number(process.env.PORT || 8787);
-const MAX_CONNECTIONS_PER_HOST = 8;
 const MAX_STREAMS_PER_CONNECTION = 64;
 
 // WARP is deliberately a TCP-only development relay for this milestone.
@@ -19,7 +18,10 @@ Object.assign(wisp.options, {
   allow_private_ips: false,
   allow_loopback_ips: false,
   stream_limit_total: MAX_STREAMS_PER_CONNECTION,
-  stream_limit_per_host: MAX_CONNECTIONS_PER_HOST,
+  // Wisp JS 0.5.0 currently iterates connection.streams as an array here,
+  // while its ServerConnection stores it as an object. Disable that optional
+  // per-host limiter to avoid crashing stream creation; the global cap remains.
+  stream_limit_per_host: -1,
   parse_real_ip: false,
   hostname_blacklist: null,
   hostname_whitelist: null,
@@ -70,7 +72,7 @@ function createWarpServer() {
         udpForwarding: false,
         privateDestinations: false,
         maxStreamsPerConnection: MAX_STREAMS_PER_CONNECTION,
-        maxStreamsPerHost: MAX_CONNECTIONS_PER_HOST
+        maxStreamsPerHost: null
       }));
       return;
     }
@@ -143,6 +145,7 @@ if (require.main === module) {
     console.log(`[WARP] Wisp endpoint: ws://${HOST}:${PORT}/wisp/`);
     console.log('[WARP] Wisp v1/v2; TCP enabled; UDP disabled.');
     console.log('[WARP] Private/loopback destinations and selected admin ports are blocked.');
+    console.log('[WARP] Global stream limit: ' + MAX_STREAMS_PER_CONNECTION + '; per-host limit disabled due to upstream library incompatibility.');
   });
 
   let shuttingDown = false;
