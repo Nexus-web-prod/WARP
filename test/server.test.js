@@ -162,6 +162,8 @@ test('browser proxy rewrites common HTML and CSS resource URLs', () => {
   assert.ok(html.includes('new MutationObserver'), 'style and srcset mutations must be observed');
   assert.ok(html.includes('HTMLImageElement') && html.includes('HTMLLinkElement'), 'image and icon property URLs must be proxied');
   assert.ok(html.includes('event.stopImmediatePropagation()'), 'proxy navigation must run before client-side routers inspect rewritten links');
+  assert.ok(html.includes('location.assign(localPokiUrl(upstream))'), 'Poki game links must navigate to their local virtual-host route, not the upstream /proxy endpoint');
+  assert.ok(html.includes('literal /proxy route'), 'Poki click handling must guard against the moved-game page caused by proxy-path navigation');
   assert.ok(!html.includes('<base href=') && !html.includes('<base target='), 'base tags should be removed so relative URLs do not escape the proxy');
   const css = rewriteCss('body{background:url("../img/bg.png")} @import "theme.css";', 'https://example.com/css/site.css');
   assert.ok(css.includes('/proxy?url=https%3A%2F%2Fexample.com%2Fimg%2Fbg.png'));
