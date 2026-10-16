@@ -61,25 +61,34 @@ async function validateTarget(input) {
   return url;
 }
 
-function proxyUrl(value, base) {
+function isPokiHost(hostname) {
+  const host = String(hostname || '').toLowerCase();
+  return host === 'poki.com' || host === 'www.poki.com';
+}
+
+function proxyUrl(value, base, localPokiOrigin = null) {
   try {
     const resolved = new URL(value, base);
     if (resolved.protocol !== 'http:' && resolved.protocol !== 'https:') return value;
-    // Preserve the source page as a referrer for CDNs that hotlink-protect images.
-    return '/proxy?url=' + encodeURIComponent(resolved.href) + '&referer=' + encodeURIComponent(new URL(base).href);
+    const source = new URL(base);
+    // Keep Poki's real URL path visible to its SPA router through a local virtual host.
+    if (localPokiOrigin && isPokiHost(source.hostname) && isPokiHost(resolved.hostname)) {
+      return localPokiOrigin + resolved.pathname + resolved.search + resolved.hash;
+    }
+    return '/proxy?url=' + encodeURIComponent(resolved.href) + '&referer=' + encodeURIComponent(source.href);
   } catch { return value; }
 }
 
-function rewriteCss(css, base) {
+function rewriteCss(css, base, localPokiOrigin = null) {
   return css.replace(/url\(\s*(['"]?)(.*?)\1\s*\)/gi, (whole, quote, value) => {
     const raw = value.trim();
     if (!raw || /^(data:|blob:|#|about:|javascript:)/i.test(raw)) return whole;
-    return 'url("' + proxyUrl(raw, base).replace(/"/g, '%22') + '")';
+    return 'url("' + proxyUrl(raw, base, localPokiOrigin).replace(/"/g, '%22') + '")';
   }).replace(/@import\s+(?:url\()?\s*(['"])(.*?)\1\s*\)?/gi,
-    (whole, quote, value) => '@import url("' + proxyUrl(value, base) + '")');
+    (whole, quote, value) => '@import url("' + proxyUrl(value, base, localPokiOrigin) + '")');
 }
 
-function rewriteHtml(html, base) {
+function rewriteHtml(html, base, localPokiOrigin = null) {
   // Protect JavaScript bodies while rewriting HTML attributes. Global HTML
   // regexes can otherwise match text like "src=" inside script strings and
   // corrupt site bundles, causing SyntaxError and broken UI icons.
@@ -97,7 +106,7 @@ function rewriteHtml(html, base) {
     (whole, attribute, quoted, doubleValue, singleValue, bareValue) => {
       const value = doubleValue ?? singleValue ?? bareValue ?? '';
       if (!value || /^(data:|blob:|#|javascript:|mailto:|tel:|about:)/i.test(value)) return whole;
-      const rewritten = proxyUrl(value, base);
+      const rewritten = proxyUrl(value, base, localPokiOrigin);
       const quote = quoted[0] === '"' || quoted[0] === "'" ? quoted[0] : '"';
       return attribute + '=' + quote + rewritten.replace(new RegExp(quote, 'g'), '%22') + quote;
     });
@@ -107,30 +116,36 @@ function rewriteHtml(html, base) {
     // CDN query strings (for example ?format=webp,quality=80).
     const rewritten = value.split(/,\s+/).map((entry) => {
       const parts = entry.trim().split(/\s+/);
-      if (parts[0]) parts[0] = proxyUrl(parts[0], base);
+      if (parts[0]) parts[0] = proxyUrl(parts[0], base, localPokiOrigin);
       return parts.join(' ');
     }).join(', ');
     const quote = quoted[0];
     return 'srcset=' + quote + rewritten + quote;
   });
   html = html.replace(/<style\b([^>]*)>([\s\S]*?)<\/style>/gi,
-    (_whole, attrs, css) => '<style' + attrs + '>' + rewriteCss(css, base) + '</style>');
+    (_whole, attrs, css) => '<style' + attrs + '>' + rewriteCss(css, base, localPokiOrigin) + '</style>');
   html = html.replace(/\sstyle=(["'])(.*?)\1/gi,
-    (_whole, quote, css) => ' style=' + quote + rewriteCss(css, base) + quote);
+    (_whole, quote, css) => ' style=' + quote + rewriteCss(css, base, localPokiOrigin) + quote);
 
   const bootstrap = `<script>
 (() => {
   const originalBase = ${JSON.stringify(base)};
+  const localPokiOrigin = ${JSON.stringify(localPokiOrigin)};
+  const isPokiHost = (hostname) => /^(www\\.)?poki\\.com$/i.test(hostname || '');
   const proxy = (value) => {
     const raw = typeof value === 'string' ? value : value.url;
     if (typeof raw !== 'string' || /^(#|data:|blob:|javascript:|mailto:|tel:|about:)/i.test(raw)) return value;
     try {
       // Avoid wrapping an already-proxied local URL a second time.
       const local = new URL(raw, location.href);
+      if (localPokiOrigin && local.origin === localPokiOrigin) return raw;
       if (local.origin === location.origin && local.pathname === '/proxy' &&
           local.searchParams.has('url')) return raw;
       const u = new URL(raw, originalBase);
       if (u.protocol !== 'http:' && u.protocol !== 'https:') return value;
+      if (localPokiOrigin && isPokiHost(new URL(originalBase).hostname) && isPokiHost(u.hostname)) {
+        return localPokiOrigin + u.pathname + u.search + u.hash;
+      }
       return '/proxy?url=' + encodeURIComponent(u.href) + '&referer=' + encodeURIComponent(originalBase);
     } catch { return value; }
   };
@@ -219,6 +234,23 @@ async function readRequestBody(req, limit) {
   return Buffer.concat(chunks, length);
 }
 
+async function handlePokiPathProxy(req, res) {
+  let target;
+  try {
+    target = new URL(req.url, 'https://www.poki.com');
+  } catch {
+    res.writeHead(400, { 'Content-Type': 'text/plain; charset=utf-8' }).end('Invalid Poki path.');
+    return;
+  }
+  if (target.origin !== 'https://www.poki.com') {
+    res.writeHead(400, { 'Content-Type': 'text/plain; charset=utf-8' }).end('Invalid Poki path.');
+    return;
+  }
+  const forwarded = Object.create(req);
+  forwarded.url = '/proxy?url=' + encodeURIComponent(target.href);
+  return handleWebProxy(forwarded, res);
+}
+
 async function handleWebProxy(req, res) {
   if (!['GET', 'HEAD', 'POST'].includes(req.method)) {
     res.writeHead(405, { 'Content-Type': 'text/plain; charset=utf-8', Allow: 'GET, HEAD, POST' }).end('Only GET, HEAD, and POST are supported by this browser proxy.');
@@ -277,7 +309,9 @@ async function handleWebProxy(req, res) {
       if (value) headers[name] = value;
     }
     const location = upstream.headers.get('location');
-    if (location) headers.Location = proxyUrl(location, target);
+    const requestHost = String(req.headers.host || '').split(':')[0].toLowerCase();
+    const localPokiOrigin = requestHost === 'poki.localhost' ? 'http://' + req.headers.host : null;
+    if (location) headers.Location = proxyUrl(location, target, localPokiOrigin);
     if (upstream.status === 204 || upstream.status === 304) {
       res.writeHead(upstream.status, headers).end();
       return;
@@ -296,7 +330,9 @@ async function handleWebProxy(req, res) {
         return;
       }
       let body = bytes.toString(/charset=([^;]+)/i.exec(type)?.[1] || 'utf-8');
-      body = isHtml ? rewriteHtml(body, target.href) : rewriteCss(body, target.href);
+      body = isHtml
+        ? rewriteHtml(body, target.href, localPokiOrigin)
+        : rewriteCss(body, target.href, localPokiOrigin);
       res.writeHead(upstream.status, headers);
       res.end(req.method === 'HEAD' ? undefined : body);
       return;
@@ -329,4 +365,4 @@ async function handleWebProxy(req, res) {
   }
 }
 
-module.exports = { handleWebProxy, validateTarget, rewriteHtml, rewriteCss };
+module.exports = { handleWebProxy, handlePokiPathProxy, validateTarget, rewriteHtml, rewriteCss, proxyUrl };
