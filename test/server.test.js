@@ -7,7 +7,7 @@ const net = require('node:net');
 const WebSocket = require('ws');
 const { server: wisp } = require('@mercuryworkshop/wisp-js/server');
 const { createWarpServer, isLocalOrigin } = require('../src/server');
-const { rewriteHtml, rewriteCss, proxyUrl } = require('../src/web-proxy');
+const { rewriteHtml, rewriteCss, proxyUrl, upstreamPokiUrlFromLocal } = require('../src/web-proxy');
 
 async function listen(server) {
   await new Promise((resolve, reject) => {
@@ -168,6 +168,18 @@ test('browser proxy rewrites common HTML and CSS resource URLs', () => {
   const css = rewriteCss('body{background:url("../img/bg.png")} @import "theme.css";', 'https://example.com/css/site.css');
   assert.ok(css.includes('/proxy?url=https%3A%2F%2Fexample.com%2Fimg%2Fbg.png'));
   assert.ok(css.includes('/proxy?url=https%3A%2F%2Fexample.com%2Fcss%2Ftheme.css'));
+});
+
+test('Poki virtual-host referrers map back to upstream URLs without the local port', () => {
+  assert.equal(
+    upstreamPokiUrlFromLocal('http://poki.localhost:8787/en/g/drive-mad?level=2#play'),
+    'https://www.poki.com/en/g/drive-mad?level=2#play'
+  );
+  assert.equal(
+    upstreamPokiUrlFromLocal('http://games.poki.localhost:8787/assets/launcher.js'),
+    'https://games.poki.com/assets/launcher.js'
+  );
+  assert.equal(upstreamPokiUrlFromLocal('http://127.0.0.1:8787/browser-test'), null);
 });
 
 test('Poki URLs preserve SPA paths on the local virtual host', () => {
