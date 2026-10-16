@@ -126,6 +126,17 @@ test('browser proxy rewrites common HTML and CSS resource URLs', () => {
   assert.ok(css.includes('/proxy?url=https%3A%2F%2Fexample.com%2Fcss%2Ftheme.css'));
 });
 
+test('HTML URL rewriting leaves JavaScript source untouched', () => {
+  const script = `const sample = 'src="data:text/plain,hello"'; const text = "href=/example";`;
+  const html = rewriteHtml(
+    '<html><head><base href="https://example.com/"></head><body><script>' + script + '</script><img src="/icon.svg"></body></html>',
+    'https://example.com/page'
+  );
+  assert.ok(html.includes('<script>' + script + '</script>'), 'inline JavaScript must remain unchanged');
+  assert.ok(!html.includes('<base href='), 'base tags should be removed');
+  assert.ok(html.includes('/proxy?url=https%3A%2F%2Fexample.com%2Ficon.svg'));
+});
+
 test('browser proxy preserves CDN srcset URLs with commas and source referrers', () => {
   const html = rewriteHtml(
     '<html><body><img srcset="https://cdn.example/image.webp?format=webp,quality=80 1x, https://cdn.example/image@2x.webp 2x"></body></html>',
