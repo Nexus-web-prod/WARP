@@ -27,6 +27,10 @@ async function withServer(callback) {
   }
 }
 
+function contentIncludesFallback(body) {
+  return body.includes('window.location.assign(url)');
+}
+
 function get(url) {
   return new Promise((resolve, reject) => {
     http.get(url, (res) => {
@@ -113,11 +117,12 @@ test('GET /browser-test serves the WARP-proxied browser view', async () => {
     assert.equal(response.status, 200);
     assert.ok(response.headers['content-type'].startsWith('text/html'));
     assert.ok(response.headers['content-security-policy'].includes("frame-src 'self'"));
-    assert.ok(response.headers['content-security-policy'].includes('https://poki.com'), 'Poki direct-load fallback must be allowed by the browser frame policy');
+    assert.ok(!response.headers['content-security-policy'].includes('https://poki.com'), 'Poki must not rely on iframe permissions because its own policy blocks embedding');
     assert.ok(response.body.includes('<iframe id="frame"'));
     assert.ok(response.body.includes('id="address"'));
     assert.ok(response.body.includes('/proxy?url=https%3A%2F%2Fexample.com%2F'));
-    assert.ok(response.body.includes("frame.src = isPoki ? url : '/proxy?url=' + encodeURIComponent(url)"));
+    assert.ok(response.body.includes("const pokiWindow = window.open(url, '_blank')"), 'Poki must open in a top-level tab instead of the blocked iframe');
+    assert.ok(contentIncludesFallback(response.body), 'Poki must navigate the current tab if a new tab is blocked');
     assert.ok(response.body.includes("hostname === 'poki.com' || hostname.endsWith('.poki.com')"), 'Poki must retain its native path and origin for SPA game routes');
     assert.ok(response.body.includes('WARP local browser proxy'));
   });
