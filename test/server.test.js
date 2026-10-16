@@ -120,6 +120,7 @@ test('browser proxy rewrites common HTML and CSS resource URLs', () => {
   assert.ok(html.includes('/proxy?url=https%3A%2F%2Fwww.iana.org%2Fnext'));
   assert.ok(html.includes('/proxy?url=https%3A%2F%2Fwww.iana.org%2Fdir%2Fimg%2Fa.png'));
   assert.ok(html.includes('window.fetch ='));
+  assert.ok(!html.includes('<base href=') && !html.includes('<base target='), 'base tags should be removed so relative URLs do not escape the proxy');
   const css = rewriteCss('body{background:url("../img/bg.png")} @import "theme.css";', 'https://example.com/css/site.css');
   assert.ok(css.includes('/proxy?url=https%3A%2F%2Fexample.com%2Fimg%2Fbg.png'));
   assert.ok(css.includes('/proxy?url=https%3A%2F%2Fexample.com%2Fcss%2Ftheme.css'));
