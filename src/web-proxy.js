@@ -64,7 +64,8 @@ function proxyUrl(value, base) {
   try {
     const resolved = new URL(value, base);
     if (resolved.protocol !== 'http:' && resolved.protocol !== 'https:') return value;
-    return '/proxy?url=' + encodeURIComponent(resolved.href);
+    // Preserve the source page as a referrer for CDNs that hotlink-protect images.
+    return '/proxy?url=' + encodeURIComponent(resolved.href) + '&referer=' + encodeURIComponent(new URL(base).href);
   } catch { return value; }
 }
 
@@ -90,7 +91,9 @@ function rewriteHtml(html, base) {
     });
   html = html.replace(/\bsrcset\s*=\s*("([^"]*)"|'([^']*)')/gi, (whole, quoted, a, b) => {
     const value = a ?? b ?? '';
-    const rewritten = value.split(',').map((entry) => {
+    // Srcset candidates are comma-separated; do not split commas inside common
+    // CDN query strings (for example ?format=webp,quality=80).
+    const rewritten = value.split(/,\s+/).map((entry) => {
       const parts = entry.trim().split(/\s+/);
       if (parts[0]) parts[0] = proxyUrl(parts[0], base);
       return parts.join(' ');
@@ -110,7 +113,7 @@ function rewriteHtml(html, base) {
     try {
       const u = new URL(typeof value === 'string' ? value : value.url, originalBase);
       if (u.protocol !== 'http:' && u.protocol !== 'https:') return value;
-      return '/proxy?url=' + encodeURIComponent(u.href);
+      return '/proxy?url=' + encodeURIComponent(u.href) + '&referer=' + encodeURIComponent(originalBase);
     } catch { return value; }
   };
   const oldFetch = window.fetch.bind(window);
@@ -161,9 +164,15 @@ async function handleWebProxy(req, res) {
         redirect: 'manual',
         signal: AbortSignal.timeout(20000),
         headers: {
-          'User-Agent': 'Mozilla/5.0 (compatible; WARP local browser)',
+          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
           Accept: req.headers.accept || '*/*',
           'Accept-Language': req.headers['accept-language'] || 'en-US,en;q=0.9',
+          ...(requestUrl.searchParams.has('referer') ? { Referer: (() => {
+            try {
+              const referrer = new URL(requestUrl.searchParams.get('referer'));
+              return referrer.protocol === 'http:' || referrer.protocol === 'https:' ? referrer.href : undefined;
+            } catch { return undefined; }
+          })() } : {}),
           ...(req.headers.range ? { Range: req.headers.range } : {}),
           ...(req.headers['if-none-match'] ? { 'If-None-Match': req.headers['if-none-match'] } : {}),
           ...(req.headers['if-modified-since'] ? { 'If-Modified-Since': req.headers['if-modified-since'] } : {})
