@@ -155,13 +155,13 @@ test('Wisp TCP stream forwards data to and from a permitted destination', async 
   try {
     await withServer(async ({ wsUrl }) => {
       const ws = new WebSocket(wsUrl);
+      const initialCredit = waitForPacket(ws, (p) => p.type === 3 && p.streamId === 0);
       try {
         await new Promise((resolve, reject) => {
           ws.once('open', resolve);
           ws.once('error', reject);
         });
 
-        const initialCredit = waitForPacket(ws, (p) => p.type === 3 && p.streamId === 0);
         const credit = await initialCredit;
         assert.equal(credit.payload.readUInt32LE(0), 128);
 
@@ -178,8 +178,14 @@ test('Wisp TCP stream forwards data to and from a permitted destination', async 
         const received = await response;
         assert.equal(received.payload.toString(), 'echo:hello');
       } finally {
-        if (ws.readyState === WebSocket.OPEN) ws.close();
-        else if (ws.readyState !== WebSocket.CLOSED) ws.terminate();
+        if (ws.readyState === WebSocket.OPEN) {
+          await new Promise((resolve) => {
+            ws.once('close', resolve);
+            ws.close();
+          });
+        } else if (ws.readyState !== WebSocket.CLOSED) {
+          ws.terminate();
+        }
       }
     });
   } finally {
