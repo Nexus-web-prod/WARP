@@ -92,14 +92,16 @@ test('GET /health reports the Wisp TCP relay capabilities', async () => {
   });
 });
 
-test('GET /browser-test serves the local Wisp TCP diagnostic page', async () => {
+test('GET /browser-test serves a full-size direct iframe browser', async () => {
   await withServer(async ({ baseUrl }) => {
     const response = await get(`${baseUrl}/browser-test`);
     assert.equal(response.status, 200);
     assert.ok(response.headers['content-type'].startsWith('text/html'));
-    assert.ok(response.body.includes('Request example.com over WARP'));
-    assert.ok(response.body.includes('not a web proxy'));
-    assert.ok(response.body.includes('WARP TCP test'));
+    assert.ok(response.headers['content-security-policy'].includes('frame-src http: https:'));
+    assert.ok(response.body.includes('<iframe id="frame"'));
+    assert.ok(response.body.includes('id="address"'));
+    assert.ok(response.body.includes('https://example.com/'));
+    assert.ok(response.body.includes('does not tunnel page resources through WARP'));
   });
 });
 test('unknown HTTP routes return 404', async () => {
