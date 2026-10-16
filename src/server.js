@@ -78,7 +78,7 @@ function createWarpServer() {
     }
 
     if (req.method === 'GET' && pathname === '/browser-test') {
-      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Content-Security-Policy': "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src ws://127.0.0.1:8787 ws://localhost:8787" });
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Content-Security-Policy': "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src ws:" });
       res.end(`<!doctype html>
 <html lang="en">
 <head>
@@ -179,13 +179,13 @@ button{padding:7px 12px}pre{white-space:pre-wrap;overflow-wrap:anywhere;backgrou
         return;
       }
 
-      if (id === streamId && type === 2 && payload.length) {
+      if (id === streamId && type === 4) {\n        const match = response.match(/^HTTP\\/\\d(?:\\.\\d)?\\s+(\\d+)/);\n        finish(match && match[1] === '200'\n          ? 'PASS — WARP returned HTTP 200 from example.com. Full raw response shown below.'\n          : 'TCP stream closed. Inspect the response above for the HTTP status.');\n        return;\n      }\n\n      if (id === streamId && type === 2 && payload.length) {
         response += decoder.decode(payload, { stream: true });
         output.textContent = response;
         if (/\\r\\n\\r\\n/.test(response)) {
           const match = response.match(/^HTTP\\/\\d(?:\\.\\d)?\\s+(\\d+)/);
           if (match) status.textContent = 'Received HTTP response: ' + match[0] + ' (raw response shown below).';
-          if (match && match[1] === '200') finish('PASS — WARP returned HTTP 200 from example.com.');
+          if (match) status.textContent = 'Received HTTP response: ' + match[0] + ' (waiting for stream to finish; raw response shown below).';
         }
       }
     });
