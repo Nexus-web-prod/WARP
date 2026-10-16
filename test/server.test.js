@@ -152,6 +152,10 @@ test('browser proxy rewrites common HTML and CSS resource URLs', () => {
   assert.ok(html.includes('window.fetch ='));
   assert.ok(html.includes('new Request(next, input)'), 'fetch Request objects must retain their method, headers, and body');
   assert.ok(html.includes('Element.prototype.setAttribute'), 'dynamically assigned asset URLs must be proxied');
+  assert.ok(html.includes('value instanceof URL'), 'URL objects passed to fetch must be proxied');
+  assert.ok(html.includes('proxySrcset'), 'dynamically assigned srcset candidates must be proxied');
+  assert.ok(html.includes('rewriteCssValue'), 'dynamically assigned CSS URLs must be proxied');
+  assert.ok(html.includes('new MutationObserver'), 'style and srcset mutations must be observed');
   assert.ok(html.includes('HTMLImageElement') && html.includes('HTMLLinkElement'), 'image and icon property URLs must be proxied');
   assert.ok(html.includes('event.stopImmediatePropagation()'), 'proxy navigation must run before client-side routers inspect rewritten links');
   assert.ok(!html.includes('<base href=') && !html.includes('<base target='), 'base tags should be removed so relative URLs do not escape the proxy');
