@@ -122,12 +122,45 @@ function rewriteHtml(html, base) {
 (() => {
   const originalBase = ${JSON.stringify(base)};
   const proxy = (value) => {
+    const raw = typeof value === 'string' ? value : value.url;
+    if (typeof raw !== 'string' || /^(#|data:|blob:|javascript:|mailto:|tel:|about:)/i.test(raw)) return value;
     try {
-      const u = new URL(typeof value === 'string' ? value : value.url, originalBase);
+      // Avoid wrapping an already-proxied local URL a second time.
+      const local = new URL(raw, location.href);
+      if (local.origin === location.origin && local.pathname === '/proxy' &&
+          local.searchParams.has('url')) return raw;
+      const u = new URL(raw, originalBase);
       if (u.protocol !== 'http:' && u.protocol !== 'https:') return value;
       return '/proxy?url=' + encodeURIComponent(u.href) + '&referer=' + encodeURIComponent(originalBase);
     } catch { return value; }
   };
+  // Static HTML rewriting cannot see URLs assigned later by app code. Poki
+  // creates some icons/images dynamically, so route URL attributes through the
+  // same proxy when code uses setAttribute() or common DOM URL properties.
+  const oldSetAttribute = Element.prototype.setAttribute;
+  Element.prototype.setAttribute = function(name, value) {
+    if (/^(src|href|poster|action|formaction|data)$/i.test(name) && typeof value === 'string') {
+      value = proxy(value);
+    }
+    return oldSetAttribute.call(this, name, value);
+  };
+  const patchUrlProperty = (prototype, property) => {
+    if (!prototype) return;
+    const descriptor = Object.getOwnPropertyDescriptor(prototype, property);
+    if (!descriptor || !descriptor.get || !descriptor.set || !descriptor.configurable) return;
+    Object.defineProperty(prototype, property, {
+      ...descriptor,
+      set(value) { return descriptor.set.call(this, typeof value === 'string' ? proxy(value) : value); }
+    });
+  };
+  patchUrlProperty(window.HTMLImageElement && HTMLImageElement.prototype, 'src');
+  patchUrlProperty(window.HTMLScriptElement && HTMLScriptElement.prototype, 'src');
+  patchUrlProperty(window.HTMLLinkElement && HTMLLinkElement.prototype, 'href');
+  patchUrlProperty(window.HTMLSourceElement && HTMLSourceElement.prototype, 'src');
+  patchUrlProperty(window.HTMLMediaElement && HTMLMediaElement.prototype, 'src');
+  patchUrlProperty(window.HTMLMediaElement && HTMLMediaElement.prototype, 'poster');
+  patchUrlProperty(window.HTMLAnchorElement && HTMLAnchorElement.prototype, 'href');
+  patchUrlProperty(window.HTMLFormElement && HTMLFormElement.prototype, 'action');
   const oldFetch = window.fetch.bind(window);
   window.fetch = (input, init) => {
     const next = proxy(input);
