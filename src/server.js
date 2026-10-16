@@ -179,7 +179,15 @@ button{padding:7px 12px}pre{white-space:pre-wrap;overflow-wrap:anywhere;backgrou
         return;
       }
 
-      if (id === streamId && type === 4) {\n        const match = response.match(/^HTTP\\/\\d(?:\\.\\d)?\\s+(\\d+)/);\n        finish(match && match[1] === '200'\n          ? 'PASS — WARP returned HTTP 200 from example.com. Full raw response shown below.'\n          : 'TCP stream closed. Inspect the response above for the HTTP status.');\n        return;\n      }\n\n      if (id === streamId && type === 2 && payload.length) {
+      if (id === streamId && type === 4) {
+        const match = response.match(/^HTTP\\/\\d(?:\\.\\d)?\\s+(\\d+)/);
+        finish(match && match[1] === '200'
+          ? 'PASS — WARP returned HTTP 200 from example.com. Full raw response shown below.'
+          : 'TCP stream closed. Inspect the response above for the HTTP status.');
+        return;
+      }
+
+      if (id === streamId && type === 2 && payload.length) {
         response += decoder.decode(payload, { stream: true });
         output.textContent = response;
         if (/\\r\\n\\r\\n/.test(response)) {
