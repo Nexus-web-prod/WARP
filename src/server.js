@@ -162,19 +162,9 @@ button:disabled{opacity:.45;cursor:default}
     }
     address.value = url;
     const hostname = new URL(url).hostname.toLowerCase();
-    // Poki's own frame-ancestors policy rejects WARP's iframe. Open Poki as a
-    // top-level page instead; keep the WARP tab available when popups are allowed.
-    // If the browser blocks the new tab, navigate this tab directly as a fallback.
-    const isPoki = hostname === 'poki.com' || hostname.endsWith('.poki.com');
-    if (isPoki) {
-      const pokiWindow = window.open(url, '_blank');
-      if (pokiWindow) {
-        pokiWindow.opener = null;
-      } else {
-        window.location.assign(url);
-      }
-      return;
-    }
+    // Always load sites through WARP's compatibility proxy. In particular,
+    // native Poki URLs reject embedding via frame-ancestors; the proxy fetches
+    // the page and deliberately does not forward that upstream frame policy.
     frame.src = '/proxy?url=' + encodeURIComponent(url);
     if (record) {
       history.splice(index + 1);
