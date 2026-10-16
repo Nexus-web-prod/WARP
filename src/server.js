@@ -78,7 +78,7 @@ function createWarpServer() {
       return;
     }
 
-    if ((req.method === 'GET' || req.method === 'HEAD') && pathname === '/proxy') {
+    if (pathname === '/proxy') {
       void handleWebProxy(req, res);
       return;
     }
