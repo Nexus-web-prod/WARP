@@ -192,7 +192,6 @@ button{padding:7px 12px}pre{white-space:pre-wrap;overflow-wrap:anywhere;backgrou
         output.textContent = response;
         if (/\\r\\n\\r\\n/.test(response)) {
           const match = response.match(/^HTTP\\/\\d(?:\\.\\d)?\\s+(\\d+)/);
-          if (match) status.textContent = 'Received HTTP response: ' + match[0] + ' (raw response shown below).';
           if (match) status.textContent = 'Received HTTP response: ' + match[0] + ' (waiting for stream to finish; raw response shown below).';
         }
       }
