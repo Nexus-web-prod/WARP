@@ -79,6 +79,17 @@ function rewriteCss(css, base) {
 }
 
 function rewriteHtml(html, base) {
+  // Protect JavaScript bodies while rewriting HTML attributes. Global HTML
+  // regexes can otherwise match text like "src=" inside script strings and
+  // corrupt site bundles, causing SyntaxError and broken UI icons.
+  const scriptBodies = [];
+  html = html.replace(/(<script\\b[^>]*>)([\\s\\S]*?)(<\\/script\\s*>)/gi,
+    (_whole, opening, body, closing) => {
+      const token = 'WARP_SCRIPT_BODY_' + scriptBodies.length + '_END';
+      scriptBodies.push(body);
+      return opening + token + closing;
+    });
+  html = html.replace(/<base\\b[^>]*>/gi, '');
   // Rewrite common URL-bearing attributes so resources and navigation stay
   // on the local origin. This is a compatibility proxy, not a full browser engine.
   html = html.replace(/\b(href|src|action|poster|data|formaction)\s*=\s*("([^"]*)"|'([^']*)'|([^\s>]+))/gi,
@@ -139,6 +150,7 @@ function rewriteHtml(html, base) {
   const head = /<head\b[^>]*>/i.exec(html);
   if (head) html = html.slice(0, head.index + head[0].length) + bootstrap + html.slice(head.index + head[0].length);
   else html = bootstrap + html;
+  html = html.replace(/WARP_SCRIPT_BODY_(\\d+)_END/g, (_whole, index) => scriptBodies[Number(index)] ?? _whole);
   return html;
 }
 
