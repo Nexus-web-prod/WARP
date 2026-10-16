@@ -7,6 +7,7 @@ const net = require('node:net');
 const WebSocket = require('ws');
 const { server: wisp } = require('@mercuryworkshop/wisp-js/server');
 const { createWarpServer, isLocalOrigin } = require('../src/server');
+const { rewriteHtml, rewriteCss } = require('../src/web-proxy');
 
 async function listen(server) {
   await new Promise((resolve, reject) => {
@@ -92,18 +93,38 @@ test('GET /health reports the Wisp TCP relay capabilities', async () => {
   });
 });
 
-test('GET /browser-test serves a full-size direct iframe browser', async () => {
+test('GET /browser-test serves the WARP-proxied browser view', async () => {
   await withServer(async ({ baseUrl }) => {
     const response = await get(`${baseUrl}/browser-test`);
     assert.equal(response.status, 200);
     assert.ok(response.headers['content-type'].startsWith('text/html'));
-    assert.ok(response.headers['content-security-policy'].includes('frame-src http: https:'));
+    assert.ok(response.headers['content-security-policy'].includes("frame-src 'self'"));
     assert.ok(response.body.includes('<iframe id="frame"'));
     assert.ok(response.body.includes('id="address"'));
-    assert.ok(response.body.includes('https://example.com/'));
-    assert.ok(response.body.includes('does not tunnel page resources through WARP'));
+    assert.ok(response.body.includes('/proxy?url=https%3A%2F%2Fexample.com%2F'));
+    assert.ok(response.body.includes("frame.src = '/proxy?url=' + encodeURIComponent(url)"));
+    assert.ok(response.body.includes('WARP local browser proxy'));
   });
 });
+
+test('browser proxy rejects missing and private destination URLs', async () => {
+  await withServer(async ({ baseUrl }) => {
+    assert.equal((await get(`${baseUrl}/proxy`)).status, 400);
+    assert.equal((await get(`${baseUrl}/proxy?url=http%3A%2F%2F127.0.0.1%2Fhealth`)).status, 403);
+    assert.equal((await get(`${baseUrl}/proxy?url=http%3A%2F%2Flocalhost%2F`)).status, 403);
+  });
+});
+
+test('browser proxy rewrites common HTML and CSS resource URLs', () => {
+  const html = rewriteHtml('<html><head></head><body><a href="/next">next</a><img src="img/a.png"></body></html>', 'https://www.iana.org/dir/page');
+  assert.ok(html.includes('/proxy?url=https%3A%2F%2Fwww.iana.org%2Fnext'));
+  assert.ok(html.includes('/proxy?url=https%3A%2F%2Fwww.iana.org%2Fdir%2Fimg%2Fa.png'));
+  assert.ok(html.includes('window.fetch ='));
+  const css = rewriteCss('body{background:url("../img/bg.png")} @import "theme.css";', 'https://example.com/css/site.css');
+  assert.ok(css.includes('/proxy?url=https%3A%2F%2Fexample.com%2Fimg%2Fbg.png'));
+  assert.ok(css.includes('/proxy?url=https%3A%2F%2Fexample.com%2Fcss%2Ftheme.css'));
+});
+
 test('unknown HTTP routes return 404', async () => {
   await withServer(async ({ baseUrl }) => {
     assert.equal((await get(`${baseUrl}/missing`)).status, 404);
