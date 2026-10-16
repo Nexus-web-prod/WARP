@@ -20,8 +20,15 @@ By default the server binds to `127.0.0.1:8787`.
 
 - Health: http://127.0.0.1:8787/health
 - Wisp WebSocket: ws://127.0.0.1:8787/wisp/
+- Browser TCP test: http://127.0.0.1:8787/browser-test
 
 Set `PORT` to change the port. Set `WARP_HOST` to change the bind address.
+
+## Browser TCP test
+
+With `npm start` running, open http://127.0.0.1:8787/browser-test and click **Request example.com over WARP**. The page opens a local WebSocket to WARP, performs the Wisp v2 handshake, requests `example.com:80` over a TCP stream, and displays the raw HTTP response returned by that connection. This validates browser-to-WARP TCP forwarding without rewriting pages or acting as a web proxy.
+
+This is intentionally a transport diagnostic, **not** a full website renderer. Rendering arbitrary websites through a relay would require an additional browser proxy/transport layer, which this project does not add.
 
 ## Current implementation
 
