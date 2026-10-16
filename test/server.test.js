@@ -180,7 +180,7 @@ test('Wisp TCP stream forwards data to and from a permitted destination', async 
     allow_udp_streams: false,
     port_blacklist: [0],
     stream_limit_total: 64,
-    stream_limit_per_host: 8
+    stream_limit_per_host: -1
   });
 
   try {
