@@ -269,6 +269,11 @@ async function handleWebProxy(req, res) {
     res.writeHead(upstream.status, headers);
     await pipeline(Readable.fromWeb(upstream.body), res);
   } catch (error) {
+    // Fetch failures otherwise look identical in the browser console. Log only
+    // the method, destination hostname, and network error code (never query data).
+    let failedHost = 'invalid-url';
+    try { failedHost = new URL(initial).hostname; } catch { /* Keep safe fallback. */ }
+    console.error('[WARP proxy]', req.method, failedHost, error.cause?.code || error.name, error.message);
     if (res.headersSent) {
       res.destroy(error);
       return;
