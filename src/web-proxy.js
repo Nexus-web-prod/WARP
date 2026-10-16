@@ -2,6 +2,8 @@
 
 const dns = require('node:dns').promises;
 const net = require('node:net');
+const { Readable } = require('node:stream');
+const { pipeline } = require('node:stream/promises');
 
 const MAX_REDIRECTS = 6;
 const MAX_BODY_BYTES = 20 * 1024 * 1024;
@@ -173,10 +175,14 @@ async function handleWebProxy(req, res) {
     const type = upstream.headers.get('content-type') || 'application/octet-stream';
     const headers = {
       'Content-Type': type,
-      'Cache-Control': 'no-store',
+      'Cache-Control': /text\\/html|text\\/css/i.test(type) ? 'no-store' : 'public, max-age=300',
       'X-Content-Type-Options': 'nosniff',
       'Referrer-Policy': 'no-referrer'
     };
+    for (const name of ['content-range', 'accept-ranges', 'last-modified', 'etag', 'content-disposition']) {
+      const value = upstream.headers.get(name);
+      if (value) headers[name] = value;
+    }
     const location = upstream.headers.get('location');
     if (location) headers.Location = proxyUrl(location, target);
     if (upstream.status === 204 || upstream.status === 304) {
@@ -203,19 +209,20 @@ async function handleWebProxy(req, res) {
       return;
     }
 
-    if (req.method === 'HEAD') {
+    if (req.method === 'HEAD' || !upstream.body) {
       res.writeHead(upstream.status, headers);
       res.end();
       return;
     }
-    const bytes = Buffer.from(await upstream.arrayBuffer());
-    if (bytes.length > MAX_BODY_BYTES) {
-      res.writeHead(413, { 'Content-Type': 'text/plain; charset=utf-8' }).end('Resource is too large for the local browser proxy.');
+    // Stream binary assets instead of buffering the entire image/video/font in
+    // memory. This removes the old 20 MB limit that silently broke large assets.
+    res.writeHead(upstream.status, headers);
+    await pipeline(Readable.fromWeb(upstream.body), res);
+  } catch (error) {
+    if (res.headersSent) {
+      res.destroy(error);
       return;
     }
-    res.writeHead(upstream.status, headers);
-    res.end(bytes);
-  } catch (error) {
     const status = /private destinations|Only HTTP|credentials/.test(error.message) ? 403 :
       /valid website URL|Missing url/.test(error.message) ? 400 : 502;
     res.writeHead(status, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
