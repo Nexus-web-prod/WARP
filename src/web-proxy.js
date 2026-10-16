@@ -163,7 +163,10 @@ async function handleWebProxy(req, res) {
         headers: {
           'User-Agent': 'Mozilla/5.0 (compatible; WARP local browser)',
           Accept: req.headers.accept || '*/*',
-          'Accept-Language': req.headers['accept-language'] || 'en-US,en;q=0.9'
+          'Accept-Language': req.headers['accept-language'] || 'en-US,en;q=0.9',
+          ...(req.headers.range ? { Range: req.headers.range } : {}),
+          ...(req.headers['if-none-match'] ? { 'If-None-Match': req.headers['if-none-match'] } : {}),
+          ...(req.headers['if-modified-since'] ? { 'If-Modified-Since': req.headers['if-modified-since'] } : {})
         }
       });
       if (![301, 302, 303, 307, 308].includes(upstream.status)) break;
