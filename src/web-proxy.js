@@ -150,6 +150,11 @@ async function handleWebProxy(req, res) {
 
   const requestUrl = new URL(req.url, 'http://localhost');
   const initial = requestUrl.searchParams.get('url');
+  let referer;
+  try {
+    const candidate = new URL(requestUrl.searchParams.get('referer') || '');
+    if (candidate.protocol === 'http:' || candidate.protocol === 'https:') referer = candidate.href;
+  } catch { /* Ignore invalid optional referrers. */ }
   if (!initial) {
     res.writeHead(400, { 'Content-Type': 'text/plain; charset=utf-8' }).end('Missing url parameter.');
     return;
@@ -167,12 +172,7 @@ async function handleWebProxy(req, res) {
           'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
           Accept: req.headers.accept || '*/*',
           'Accept-Language': req.headers['accept-language'] || 'en-US,en;q=0.9',
-          ...(requestUrl.searchParams.has('referer') ? { Referer: (() => {
-            try {
-              const referrer = new URL(requestUrl.searchParams.get('referer'));
-              return referrer.protocol === 'http:' || referrer.protocol === 'https:' ? referrer.href : undefined;
-            } catch { return undefined; }
-          })() } : {}),
+          ...(referer ? { Referer: referer } : {}),
           ...(req.headers.range ? { Range: req.headers.range } : {}),
           ...(req.headers['if-none-match'] ? { 'If-None-Match': req.headers['if-none-match'] } : {}),
           ...(req.headers['if-modified-since'] ? { 'If-Modified-Since': req.headers['if-modified-since'] } : {})
