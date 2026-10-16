@@ -1,7 +1,7 @@
 'use strict';
 
 const http = require('node:http');
-const { handleWebProxy } = require('./web-proxy');
+const { handleWebProxy, handlePokiPathProxy } = require('./web-proxy');
 const { server: wisp, logging } = require('@mercuryworkshop/wisp-js/server');
 
 const HOST = process.env.WARP_HOST || '127.0.0.1';
@@ -86,7 +86,7 @@ function createWarpServer() {
     if (req.method === 'GET' && pathname === '/browser-test') {
       res.writeHead(200, {
         'Content-Type': 'text/html; charset=utf-8',
-        'Content-Security-Policy': "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self' ws:; frame-src 'self'"
+        'Content-Security-Policy': "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self' ws:; frame-src 'self' http://poki.localhost:" + PORT
       });
       res.end(`<!doctype html>
 <html lang="en">
@@ -161,11 +161,21 @@ button:disabled{opacity:.45;cursor:default}
       return;
     }
     address.value = url;
-    const hostname = new URL(url).hostname.toLowerCase();
-    // Always load sites through WARP's compatibility proxy. In particular,
-    // native Poki URLs reject embedding via frame-ancestors; the proxy fetches
-    // the page and deliberately does not forward that upstream frame policy.
-    frame.src = '/proxy?url=' + encodeURIComponent(url);
+    const parsed = new URL(url);
+    const hostname = parsed.hostname.toLowerCase();
+    // Poki requires path-preserving SPA routes. Route it through a dedicated
+    // localhost virtual host so its iframe sees /en/games/... while WARP strips
+    // Poki's upstream frame-ancestors policy. Do not open external tabs.
+    const isPoki = hostname === 'poki.com' || hostname === 'www.poki.com';
+    if (isPoki) {
+      const localPoki = new URL(location.protocol + '//poki.localhost:' + location.port);
+      localPoki.pathname = parsed.pathname;
+      localPoki.search = parsed.search;
+      localPoki.hash = parsed.hash;
+      frame.src = localPoki.href;
+    } else {
+      frame.src = '/proxy?url=' + encodeURIComponent(url);
+    }
     if (record) {
       history.splice(index + 1);
       history.push(url);
@@ -197,6 +207,12 @@ button:disabled{opacity:.45;cursor:default}
 </script>
 </body>
 </html>`);
+      return;
+    }
+
+    const requestHost = String(req.headers.host || '').split(':')[0].toLowerCase();
+    if (requestHost === 'poki.localhost') {
+      void handlePokiPathProxy(req, res);
       return;
     }
 
