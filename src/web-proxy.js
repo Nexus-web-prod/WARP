@@ -150,7 +150,7 @@ function rewriteHtml(html, base) {
   const head = /<head\b[^>]*>/i.exec(html);
   if (head) html = html.slice(0, head.index + head[0].length) + bootstrap + html.slice(head.index + head[0].length);
   else html = bootstrap + html;
-  html = html.replace(/WARP_SCRIPT_BODY_(\\d+)_END/g, (_whole, index) => scriptBodies[Number(index)] ?? _whole);
+  html = html.replace(/WARP_SCRIPT_BODY_(\d+)_END/g, (_whole, index) => scriptBodies[Number(index)] ?? _whole);
   return html;
 }
 
