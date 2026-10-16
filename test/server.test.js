@@ -96,10 +96,10 @@ test('GET /browser-test serves the local Wisp TCP diagnostic page', async () => 
   await withServer(async ({ baseUrl }) => {
     const response = await get(`${baseUrl}/browser-test`);
     assert.equal(response.status, 200);
-    assert.match(response.headers['content-type'], /text\\/html/);
-    assert.match(response.body, /Request example\\.com over WARP/);
-    assert.match(response.body, /not a web proxy/);
-    assert.match(response.body, /Wisp TCP/);
+    assert.ok(response.headers['content-type'].startsWith('text/html'));
+    assert.ok(response.body.includes('Request example.com over WARP'));
+    assert.ok(response.body.includes('not a web proxy'));
+    assert.ok(response.body.includes('WARP TCP test'));
   });
 });
 test('unknown HTTP routes return 404', async () => {
