@@ -7,7 +7,7 @@ const net = require('node:net');
 const WebSocket = require('ws');
 const { server: wisp } = require('@mercuryworkshop/wisp-js/server');
 const { createWarpServer, isLocalOrigin } = require('../src/server');
-const { rewriteHtml, rewriteCss, proxyUrl, upstreamPokiUrlFromLocal } = require('../src/web-proxy');
+const { rewriteHtml, rewriteCss, proxyUrl, upstreamPokiUrlFromLocal, applyPokiCorsHeaders } = require('../src/web-proxy');
 
 async function listen(server) {
   await new Promise((resolve, reject) => {
@@ -168,6 +168,20 @@ test('browser proxy rewrites common HTML and CSS resource URLs', () => {
   const css = rewriteCss('body{background:url("../img/bg.png")} @import "theme.css";', 'https://example.com/css/site.css');
   assert.ok(css.includes('/proxy?url=https%3A%2F%2Fexample.com%2Fimg%2Fbg.png'));
   assert.ok(css.includes('/proxy?url=https%3A%2F%2Fexample.com%2Fcss%2Ftheme.css'));
+});
+
+test('Poki virtual-host responses allow CORS only for local Poki origins', () => {
+  const headers = applyPokiCorsHeaders({}, 'http://poki.localhost:8787');
+  assert.equal(headers['Access-Control-Allow-Origin'], 'http://poki.localhost:8787');
+  assert.equal(headers['Access-Control-Allow-Credentials'], 'true');
+  assert.equal(headers.Vary, 'Origin');
+
+  const subdomainHeaders = applyPokiCorsHeaders({}, 'http://api.poki.localhost:8787');
+  assert.equal(subdomainHeaders['Access-Control-Allow-Origin'], 'http://api.poki.localhost:8787');
+
+  assert.deepEqual(applyPokiCorsHeaders({}, 'https://attacker.example'), {});
+  assert.deepEqual(applyPokiCorsHeaders({}, 'null'), {});
+  assert.deepEqual(applyPokiCorsHeaders({}, undefined), {});
 });
 
 test('Poki virtual-host referrers map back to upstream URLs without the local port', () => {
