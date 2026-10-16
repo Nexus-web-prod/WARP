@@ -38,6 +38,20 @@ function get(url) {
   });
 }
 
+function request(method, url, body) {
+  return new Promise((resolve, reject) => {
+    const req = http.request(url, { method, headers: body ? { 'Content-Type': 'text/plain', 'Content-Length': Buffer.byteLength(body) } : {} }, (res) => {
+      let responseBody = '';
+      res.setEncoding('utf8');
+      res.on('data', (chunk) => { responseBody += chunk; });
+      res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, body: responseBody }));
+    });
+    req.on('error', reject);
+    if (body) req.write(body);
+    req.end();
+  });
+}
+
 function packet(type, streamId, payload = Buffer.alloc(0)) {
   const header = Buffer.alloc(5);
   header.writeUInt8(type, 0);
@@ -115,11 +129,23 @@ test('browser proxy rejects missing and private destination URLs', async () => {
   });
 });
 
+test('browser proxy routes POST requests and rejects unsupported methods clearly', async () => {
+  await withServer(async ({ baseUrl }) => {
+    const post = await request('POST', `${baseUrl}/proxy`, 'telemetry');
+    assert.equal(post.status, 400, 'POST should reach the proxy handler instead of returning route 404');
+    assert.match(post.body, /Missing url parameter/);
+    const unsupported = await request('PUT', `${baseUrl}/proxy`);
+    assert.equal(unsupported.status, 405);
+    assert.match(unsupported.headers.allow, /POST/);
+  });
+});
+
 test('browser proxy rewrites common HTML and CSS resource URLs', () => {
   const html = rewriteHtml('<html><head></head><body><a href="/next">next</a><img src="img/a.png"></body></html>', 'https://www.iana.org/dir/page');
   assert.ok(html.includes('/proxy?url=https%3A%2F%2Fwww.iana.org%2Fnext'));
   assert.ok(html.includes('/proxy?url=https%3A%2F%2Fwww.iana.org%2Fdir%2Fimg%2Fa.png'));
   assert.ok(html.includes('window.fetch ='));
+  assert.ok(html.includes('new Request(next, input)'), 'fetch Request objects must retain their method, headers, and body');
   assert.ok(!html.includes('<base href=') && !html.includes('<base target='), 'base tags should be removed so relative URLs do not escape the proxy');
   const css = rewriteCss('body{background:url("../img/bg.png")} @import "theme.css";', 'https://example.com/css/site.css');
   assert.ok(css.includes('/proxy?url=https%3A%2F%2Fexample.com%2Fimg%2Fbg.png'));
