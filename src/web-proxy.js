@@ -432,6 +432,22 @@ async function handlePokiPathProxy(req, res) {
   return handleWebProxy(forwarded, res);
 }
 
+function applyPokiCorsHeaders(headers, browserOrigin) {
+  if (!browserOrigin) return headers;
+  try {
+    const originUrl = new URL(browserOrigin);
+    const originHost = originUrl.hostname.toLowerCase();
+    if ((originUrl.protocol === 'http:' || originUrl.protocol === 'https:') &&
+        (originHost === 'poki.localhost' || originHost.endsWith('.poki.localhost'))) {
+      headers['Access-Control-Allow-Origin'] = browserOrigin;
+      headers['Access-Control-Allow-Credentials'] = 'true';
+      headers['Vary'] = 'Origin';
+      headers['Access-Control-Expose-Headers'] = 'Content-Length, Content-Range, Accept-Ranges, ETag';
+    }
+  } catch { /* Ignore malformed Origin headers. */ }
+  return headers;
+}
+
 async function handleWebProxy(req, res) {
   if (!['GET', 'HEAD', 'POST'].includes(req.method)) {
     res.writeHead(405, { 'Content-Type': 'text/plain; charset=utf-8', Allow: 'GET, HEAD, POST' }).end('Only GET, HEAD, and POST are supported by this browser proxy.');
@@ -491,24 +507,7 @@ async function handleWebProxy(req, res) {
       'X-Content-Type-Options': 'nosniff',
       'Referrer-Policy': 'no-referrer'
     };
-    // Poki is rewritten onto multiple *.poki.localhost virtual hosts. Browsers
-    // treat each subdomain as a distinct origin, so SDK/API responses must
-    // explicitly permit the requesting local Poki origin or fetch/script loads
-    // are blocked by CORS before the game can initialize.
-    const browserOrigin = req.headers.origin;
-    if (browserOrigin) {
-      try {
-        const originUrl = new URL(browserOrigin);
-        const originHost = originUrl.hostname.toLowerCase();
-        if ((originUrl.protocol === 'http:' || originUrl.protocol === 'https:') &&
-            (originHost === 'poki.localhost' || originHost.endsWith('.poki.localhost'))) {
-          headers['Access-Control-Allow-Origin'] = browserOrigin;
-          headers['Access-Control-Allow-Credentials'] = 'true';
-          headers['Vary'] = 'Origin';
-          headers['Access-Control-Expose-Headers'] = 'Content-Length, Content-Range, Accept-Ranges, ETag';
-        }
-      } catch { /* Ignore malformed Origin headers. */ }
-    }
+    applyPokiCorsHeaders(headers, req.headers.origin);
     for (const name of ['content-range', 'accept-ranges', 'last-modified', 'etag', 'content-disposition']) {
       const value = upstream.headers.get(name);
       if (value) headers[name] = value;
@@ -572,4 +571,4 @@ async function handleWebProxy(req, res) {
   }
 }
 
-module.exports = { handleWebProxy, handlePokiPathProxy, validateTarget, rewriteHtml, rewriteCss, proxyUrl, upstreamPokiUrlFromLocal };
+module.exports = { handleWebProxy, handlePokiPathProxy, validateTarget, rewriteHtml, rewriteCss, proxyUrl, upstreamPokiUrlFromLocal, applyPokiCorsHeaders };
