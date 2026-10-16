@@ -147,6 +147,10 @@ function rewriteHtml(html, base, localPokiOrigin = null) {
     const host = String(hostname || '').toLowerCase();
     return host === 'poki.com' || host === 'www.poki.com' || host.endsWith('.poki.com');
   };
+  const isLocalPokiHost = (hostname) => {
+    const host = String(hostname || '').toLowerCase();
+    return host === 'poki.localhost' || host.endsWith('.poki.localhost');
+  };
   const localPokiUrl = (u) => {
     const local = new URL(localPokiOrigin);
     const host = u.hostname.toLowerCase();
@@ -159,12 +163,19 @@ function rewriteHtml(html, base, localPokiOrigin = null) {
     return local.href;
   };
   const proxy = (value) => {
-    const raw = typeof value === 'string' ? value : value.url;
+    const raw = typeof value === 'string' ? value
+      : value instanceof URL ? value.href
+      : value instanceof Request ? value.url
+      : value && typeof value.url === 'string' ? value.url
+      : null;
     if (typeof raw !== 'string' || /^(#|data:|blob:|javascript:|mailto:|tel:|about:)/i.test(raw)) return value;
     try {
-      // Avoid wrapping an already-proxied local URL a second time.
+      // Avoid wrapping an already-proxied URL, including URLs on sibling
+      // Poki virtual hosts and URL objects passed to fetch().
       const local = new URL(raw, location.href);
-      if (localPokiOrigin && local.origin === localPokiOrigin) return raw;
+      const localOrigin = localPokiOrigin ? new URL(localPokiOrigin) : null;
+      if (localOrigin && isLocalPokiHost(local.hostname) &&
+          local.protocol === localOrigin.protocol && local.port === localOrigin.port) return raw;
       if (local.origin === location.origin && local.pathname === '/proxy' &&
           local.searchParams.has('url')) return raw;
       const u = new URL(raw, originalBase);
@@ -175,13 +186,25 @@ function rewriteHtml(html, base, localPokiOrigin = null) {
       return '/proxy?url=' + encodeURIComponent(u.href) + '&referer=' + encodeURIComponent(originalBase);
     } catch { return value; }
   };
+  const proxySrcset = (value) => String(value).split(/,\\s+/).map((entry) => {
+    const parts = entry.trim().split(/\\s+/);
+    if (parts[0]) parts[0] = proxy(parts[0]);
+    return parts.join(' ');
+  }).join(', ');
+  const rewriteCssValue = (value) => String(value).replace(/url\\(\\s*(['"]?)(.*?)\\1\\s*\\)/gi, (whole, quote, raw) => {
+    const url = raw.trim();
+    if (!url || /^(data:|blob:|#|about:|javascript:)/i.test(url)) return whole;
+    return 'url("' + String(proxy(url)).replace(/"/g, '%22') + '")';
+  });
   // Static HTML rewriting cannot see URLs assigned later by app code. Poki
   // creates some icons/images dynamically, so route URL attributes through the
   // same proxy when code uses setAttribute() or common DOM URL properties.
   const oldSetAttribute = Element.prototype.setAttribute;
   Element.prototype.setAttribute = function(name, value) {
-    if (/^(src|href|poster|action|formaction|data)$/i.test(name) && typeof value === 'string') {
-      value = proxy(value);
+    if (typeof value === 'string') {
+      if (/^srcset$/i.test(name)) value = proxySrcset(value);
+      else if (/^style$/i.test(name)) value = rewriteCssValue(value);
+      else if (/^(src|href|poster|action|formaction|data)$/i.test(name)) value = proxy(value);
     }
     return oldSetAttribute.call(this, name, value);
   };
@@ -191,10 +214,16 @@ function rewriteHtml(html, base, localPokiOrigin = null) {
     if (!descriptor || !descriptor.get || !descriptor.set || !descriptor.configurable) return;
     Object.defineProperty(prototype, property, {
       ...descriptor,
-      set(value) { return descriptor.set.call(this, typeof value === 'string' ? proxy(value) : value); }
+      set(value) {
+        if (typeof value !== 'string') return descriptor.set.call(this, value);
+        const next = property === 'srcset' ? proxySrcset(value) : proxy(value);
+        return descriptor.set.call(this, next);
+      }
     });
   };
   patchUrlProperty(window.HTMLImageElement && HTMLImageElement.prototype, 'src');
+  patchUrlProperty(window.HTMLImageElement && HTMLImageElement.prototype, 'srcset');
+  patchUrlProperty(window.HTMLSourceElement && HTMLSourceElement.prototype, 'srcset');
   patchUrlProperty(window.HTMLScriptElement && HTMLScriptElement.prototype, 'src');
   patchUrlProperty(window.HTMLLinkElement && HTMLLinkElement.prototype, 'href');
   patchUrlProperty(window.HTMLSourceElement && HTMLSourceElement.prototype, 'src');
@@ -202,6 +231,33 @@ function rewriteHtml(html, base, localPokiOrigin = null) {
   patchUrlProperty(window.HTMLMediaElement && HTMLMediaElement.prototype, 'poster');
   patchUrlProperty(window.HTMLAnchorElement && HTMLAnchorElement.prototype, 'href');
   patchUrlProperty(window.HTMLFormElement && HTMLFormElement.prototype, 'action');
+  const oldSetProperty = CSSStyleDeclaration.prototype.setProperty;
+  CSSStyleDeclaration.prototype.setProperty = function(name, value, priority) {
+    return oldSetProperty.call(this, name, rewriteCssValue(value), priority);
+  };
+  // Property assignments such as element.style.backgroundImage bypass
+  // setAttribute()/setProperty(); observe the resulting style attribute too.
+  const rewriteDynamicNode = (node) => {
+    if (!(node instanceof Element)) return;
+    for (const name of ['srcset', 'style']) {
+      if (!node.hasAttribute(name)) continue;
+      const value = node.getAttribute(name);
+      const next = name === 'srcset' ? proxySrcset(value) : rewriteCssValue(value);
+      if (next !== value) node.setAttribute(name, next);
+    }
+    if (node.querySelectorAll) node.querySelectorAll('[srcset],[style]').forEach(rewriteDynamicNode);
+  };
+  new MutationObserver((records) => {
+    for (const record of records) {
+      if (record.type === 'attributes') rewriteDynamicNode(record.target);
+      for (const node of record.addedNodes || []) rewriteDynamicNode(node);
+    }
+  }).observe(document.documentElement, {
+    subtree: true,
+    childList: true,
+    attributes: true,
+    attributeFilter: ['srcset', 'style']
+  });
   const oldFetch = window.fetch.bind(window);
   window.fetch = (input, init) => {
     const next = proxy(input);
