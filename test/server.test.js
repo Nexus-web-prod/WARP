@@ -113,11 +113,13 @@ test('GET /browser-test serves the WARP-proxied browser view', async () => {
     assert.equal(response.status, 200);
     assert.ok(response.headers['content-type'].startsWith('text/html'));
     assert.ok(response.headers['content-security-policy'].includes("frame-src 'self'"));
-    assert.ok(!response.headers['content-security-policy'].includes('https://poki.com'), 'Upstream Poki framing policy should be bypassed by proxying, not iframe allowlisting');
+    assert.ok(response.headers['content-security-policy'].includes('http://poki.localhost:' + new URL(baseUrl).port), 'The frame policy must permit the local path-preserving Poki host');
     assert.ok(response.body.includes('<iframe id="frame"'));
     assert.ok(response.body.includes('id="address"'));
     assert.ok(response.body.includes('/proxy?url=https%3A%2F%2Fexample.com%2F'));
-    assert.ok(response.body.includes("frame.src = '/proxy?url=' + encodeURIComponent(url)"), 'All sites including Poki must stay inside WARP through the compatibility proxy');
+    assert.ok(response.body.includes("const localPoki = new URL(location.protocol + '//poki.localhost:' + location.port)"), 'Poki must use a path-preserving local origin');
+    assert.ok(response.body.includes('frame.src = localPoki.href'), 'Poki routes must remain inside the WARP iframe');
+    assert.ok(response.body.includes("frame.src = '/proxy?url=' + encodeURIComponent(url)"), 'Other sites must keep using the normal compatibility proxy');
     assert.ok(!response.body.includes("window.open(url, '_blank')"), 'Poki navigation must not open an external browser tab');
     assert.ok(response.body.includes('WARP local browser proxy'));
   });
@@ -155,6 +157,18 @@ test('browser proxy rewrites common HTML and CSS resource URLs', () => {
   const css = rewriteCss('body{background:url("../img/bg.png")} @import "theme.css";', 'https://example.com/css/site.css');
   assert.ok(css.includes('/proxy?url=https%3A%2F%2Fexample.com%2Fimg%2Fbg.png'));
   assert.ok(css.includes('/proxy?url=https%3A%2F%2Fexample.com%2Fcss%2Ftheme.css'));
+});
+
+test('Poki URLs preserve SPA paths on the local virtual host', () => {
+  const html = rewriteHtml(
+    '<html><body><a href="/en/games/example">game</a><script>window.gameIcon="/icons/game.svg"</script></body></html>',
+    'https://www.poki.com/',
+    'http://poki.localhost:8787'
+  );
+  assert.ok(html.includes('href="http://poki.localhost:8787/en/games/example"'), 'Poki navigation paths must remain visible to its SPA router');
+  assert.ok(html.includes('const localPokiOrigin = "http://poki.localhost:8787"'), 'The bootstrap must know the local virtual origin');
+  const css = rewriteCss('body{background:url("/assets/bg.webp")}', 'https://www.poki.com/css/site.css', 'http://poki.localhost:8787');
+  assert.ok(css.includes('http://poki.localhost:8787/assets/bg.webp'), 'Same-origin Poki CSS assets must preserve their paths');
 });
 
 test('HTML URL rewriting leaves JavaScript source untouched', () => {
