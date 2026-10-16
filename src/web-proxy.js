@@ -131,6 +131,11 @@ function rewriteHtml(html, base) {
   const oldFetch = window.fetch.bind(window);
   window.fetch = (input, init) => {
     const next = proxy(input);
+    // Preserve method, headers, credentials, and body when callers pass a
+    // Request object; reducing it to a URL silently breaks POST telemetry/API calls.
+    if (input instanceof Request && typeof next === 'string' && next !== input.url) {
+      return oldFetch(new Request(next, input), init);
+    }
     return oldFetch(next, init);
   };
   const oldOpen = XMLHttpRequest.prototype.open;
