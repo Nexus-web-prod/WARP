@@ -7,7 +7,7 @@ const net = require('node:net');
 const WebSocket = require('ws');
 const { server: wisp } = require('@mercuryworkshop/wisp-js/server');
 const { createWarpServer, isLocalOrigin } = require('../src/server');
-const { rewriteHtml, rewriteCss } = require('../src/web-proxy');
+const { rewriteHtml, rewriteCss, proxyUrl } = require('../src/web-proxy');
 
 async function listen(server) {
   await new Promise((resolve, reject) => {
@@ -114,6 +114,7 @@ test('GET /browser-test serves the WARP-proxied browser view', async () => {
     assert.ok(response.headers['content-type'].startsWith('text/html'));
     assert.ok(response.headers['content-security-policy'].includes("frame-src 'self'"));
     assert.ok(response.headers['content-security-policy'].includes('http://poki.localhost:' + new URL(baseUrl).port), 'The frame policy must permit the local path-preserving Poki host');
+    assert.ok(response.headers['content-security-policy'].includes('http://*.poki.localhost:' + new URL(baseUrl).port), 'The frame policy must permit path-preserving Poki subdomains');
     assert.ok(response.body.includes('<iframe id="frame"'));
     assert.ok(response.body.includes('id="address"'));
     assert.ok(response.body.includes('/proxy?url=https%3A%2F%2Fexample.com%2F'));
@@ -169,6 +170,19 @@ test('Poki URLs preserve SPA paths on the local virtual host', () => {
   assert.ok(html.includes('const localPokiOrigin = "http://poki.localhost:8787"'), 'The bootstrap must know the local virtual origin');
   const css = rewriteCss('body{background:url("/assets/bg.webp")}', 'https://www.poki.com/css/site.css', 'http://poki.localhost:8787');
   assert.ok(css.includes('http://poki.localhost:8787/assets/bg.webp'), 'Same-origin Poki CSS assets must preserve their paths');
+
+  assert.equal(
+    proxyUrl('https://games.poki.com/assets/game.wasm?build=42', 'https://www.poki.com/en/games/example', 'http://poki.localhost:8787'),
+    'http://games.poki.localhost:8787/assets/game.wasm?build=42',
+    'Poki subdomain assets must keep their original hostname, path, and query'
+  );
+  const subdomainHtml = rewriteHtml(
+    '<html><body><a href="https://games.poki.com/en/games/example?mode=full">game</a><img src="https://games.poki.com/assets/icon.svg"></body></html>',
+    'https://www.poki.com/',
+    'http://poki.localhost:8787'
+  );
+  assert.ok(subdomainHtml.includes('href="http://games.poki.localhost:8787/en/games/example?mode=full"'), 'Cross-subdomain game routes must preserve path and query');
+  assert.ok(subdomainHtml.includes('src="http://games.poki.localhost:8787/assets/icon.svg"'), 'Cross-subdomain icons must preserve their local virtual host');
 });
 
 test('HTML URL rewriting leaves JavaScript source untouched', () => {
