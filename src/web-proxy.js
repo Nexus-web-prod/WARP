@@ -338,6 +338,19 @@ function rewriteHtml(html, base, localPokiOrigin = null) {
         !destination.searchParams.has('url')) return;
     event.preventDefault();
     event.stopImmediatePropagation();
+    // A rewritten Poki game link must become a path-preserving Poki virtual-host
+    // URL. Navigating to /proxy?url=... on the virtual host makes Poki receive
+    // the literal /proxy route, which displays "Sorry! ... has moved" instead
+    // of opening the selected game.
+    if (localPokiOrigin) {
+      try {
+        const upstream = new URL(destination.searchParams.get('url'));
+        if (isPokiHost(upstream.hostname)) {
+          location.assign(localPokiUrl(upstream));
+          return;
+        }
+      } catch { /* Fall back to the original local proxy navigation below. */ }
+    }
     location.assign(destination.pathname + destination.search + destination.hash);
   }, true);
 })();
