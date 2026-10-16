@@ -135,6 +135,7 @@ button:disabled{opacity:.45;cursor:default}
   const frame = document.getElementById('frame');
   const history = [];
   let index = -1;
+  let lastFrameReportAt = 0;
 
   function syncAddress(value, mode = 'replace') {
     let url;
@@ -232,25 +233,30 @@ button:disabled{opacity:.45;cursor:default}
         !(event.origin === location.origin || (source.protocol === location.protocol && pokiHost(source.hostname))) ||
         !['http:', 'https:'].includes(destination.protocol) ||
         destination.username || destination.password) return;
+    lastFrameReportAt = Date.now();
     syncAddress(destination.href, event.data.mode === 'push' ? 'push' : 'replace');
   });
 
   frame.addEventListener('load', () => {
-    // Same-origin proxy responses may not run injected reporting (binary/error
-    // pages), so unwrap their requested URL as a useful fallback.
-    try {
-      const current = new URL(frame.contentWindow.location.href);
-      if (current.pathname === '/proxy' && current.searchParams.has('url')) {
-        syncAddress(current.searchParams.get('url'), 'replace');
-      } else if (current.hostname === 'poki.localhost' || current.hostname.endsWith('.poki.localhost')) {
-        const upstream = new URL(current.href);
-        upstream.protocol = 'https:';
-        upstream.hostname = current.hostname === 'poki.localhost'
-          ? 'www.poki.com'
-          : current.hostname.slice(0, -'.poki.localhost'.length) + '.poki.com';
-        syncAddress(upstream.href, 'replace');
-      }
-    } catch { /* Poki's virtual host is intentionally cross-origin to the UI. */ }
+    // Let an injected page report its final upstream URL first. Fall back only
+    // when the response is binary/an error page and no report arrives.
+    const reportAtLoad = lastFrameReportAt;
+    setTimeout(() => {
+      if (lastFrameReportAt !== reportAtLoad && Date.now() - lastFrameReportAt < 1000) return;
+      try {
+        const current = new URL(frame.contentWindow.location.href);
+        if (current.pathname === '/proxy' && current.searchParams.has('url')) {
+          syncAddress(current.searchParams.get('url'), 'replace');
+        } else if (current.hostname === 'poki.localhost' || current.hostname.endsWith('.poki.localhost')) {
+          const upstream = new URL(current.href);
+          upstream.protocol = 'https:';
+          upstream.hostname = current.hostname === 'poki.localhost'
+            ? 'www.poki.com'
+            : current.hostname.slice(0, -'.poki.localhost'.length) + '.poki.com';
+          syncAddress(upstream.href, 'replace');
+        }
+      } catch { /* Poki's virtual host is intentionally cross-origin to the UI. */ }
+    }, 150);
   });
 
   document.getElementById('go').addEventListener('click', () => navigate(address.value));
