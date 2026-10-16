@@ -161,7 +161,13 @@ button:disabled{opacity:.45;cursor:default}
       return;
     }
     address.value = url;
-    frame.src = '/proxy?url=' + encodeURIComponent(url);
+    const hostname = new URL(url).hostname.toLowerCase();
+    // Poki is a path-sensitive SPA: its router and game loader require the real
+    // /en/games/... URL and origin. Serving it under /proxy?url=... makes Poki
+    // interpret every route as missing. Use the native page only for Poki;
+    // all other sites continue through WARP's local compatibility proxy.
+    const isPoki = hostname === 'poki.com' || hostname.endsWith('.poki.com');
+    frame.src = isPoki ? url : '/proxy?url=' + encodeURIComponent(url);
     if (record) {
       history.splice(index + 1);
       history.push(url);
