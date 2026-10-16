@@ -1,0 +1,18 @@
+{
+  "name": "warp",
+  "version": "0.1.0",
+  "private": true,
+  "description": "WARP in-browser socket tunnel and local relay",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "check": "node --check src/server.js && node --check test/server.test.js",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "ws": "^8.18.3"
+  }
+}
