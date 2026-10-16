@@ -117,6 +117,37 @@ test('WebSocket upgrades on paths other than /wisp/ are rejected', async () => {
   });
 });
 
+test('Wisp v2 performs INFO handshake and grants initial stream credit', async () => {
+  await withServer(async ({ wsUrl }) => {
+    const ws = new WebSocket(wsUrl, 'wisp-v2');
+    const serverInfoPromise = waitForPacket(ws, (p) => p.type === 5 && p.streamId === 0);
+    try {
+      await new Promise((resolve, reject) => {
+        ws.once('open', resolve);
+        ws.once('error', reject);
+      });
+
+      const serverInfo = await serverInfoPromise;
+      assert.equal(serverInfo.payload.readUInt8(0), 2);
+      assert.equal(serverInfo.payload.readUInt8(1), 0);
+
+      const creditPromise = waitForPacket(ws, (p) => p.type === 3 && p.streamId === 0);
+      ws.send(packet(5, 0, Buffer.from([2, 0])));
+      const credit = await creditPromise;
+      assert.equal(credit.payload.readUInt32LE(0), 128);
+    } finally {
+      if (ws.readyState === WebSocket.OPEN) {
+        await new Promise((resolve) => {
+          ws.once('close', resolve);
+          ws.close();
+        });
+      } else if (ws.readyState !== WebSocket.CLOSED) {
+        ws.terminate();
+      }
+    }
+  });
+});
+
 test('browser origins outside localhost are rejected', () => {
   assert.equal(isLocalOrigin('http://localhost:3000'), true);
   assert.equal(isLocalOrigin('http://127.0.0.1:8080'), true);
