@@ -242,7 +242,7 @@ button:disabled{opacity:.45;cursor:default}
     // when the response is binary/an error page and no report arrives.
     const reportAtLoad = lastFrameReportAt;
     setTimeout(() => {
-      if (lastFrameReportAt !== reportAtLoad && Date.now() - lastFrameReportAt < 1000) return;
+      if (lastFrameReportAt !== reportAtLoad || (lastFrameReportAt && Date.now() - lastFrameReportAt < 1000)) return;
       try {
         const current = new URL(frame.contentWindow.location.href);
         if (current.pathname === '/proxy' && current.searchParams.has('url')) {
