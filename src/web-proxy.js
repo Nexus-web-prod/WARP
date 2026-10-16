@@ -402,7 +402,11 @@ async function handlePokiPathProxy(req, res) {
     return;
   }
   const forwarded = Object.create(req);
-  forwarded.url = '/proxy?url=' + encodeURIComponent(target.href);
+  // Keep upstream requests looking like they originated from the real Poki page.
+  // Without a real Referer, Poki's game launcher/API can return its generic
+  // "page does not exist" response even though the game route itself is valid.
+  forwarded.url = '/proxy?url=' + encodeURIComponent(target.href) +
+    '&referer=' + encodeURIComponent(target.href);
   return handleWebProxy(forwarded, res);
 }
 
