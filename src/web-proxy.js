@@ -63,7 +63,19 @@ async function validateTarget(input) {
 
 function isPokiHost(hostname) {
   const host = String(hostname || '').toLowerCase();
-  return host === 'poki.com' || host === 'www.poki.com';
+  return host === 'poki.com' || host === 'www.poki.com' || host.endsWith('.poki.com');
+}
+
+function localPokiUrl(resolved, localPokiOrigin) {
+  const local = new URL(localPokiOrigin);
+  const host = resolved.hostname.toLowerCase();
+  local.hostname = host === 'poki.com' || host === 'www.poki.com'
+    ? 'poki.localhost'
+    : host.slice(0, -'.poki.com'.length) + '.poki.localhost';
+  local.pathname = resolved.pathname;
+  local.search = resolved.search;
+  local.hash = resolved.hash;
+  return local.href;
 }
 
 function proxyUrl(value, base, localPokiOrigin = null) {
@@ -73,7 +85,7 @@ function proxyUrl(value, base, localPokiOrigin = null) {
     const source = new URL(base);
     // Keep Poki's real URL path visible to its SPA router through a local virtual host.
     if (localPokiOrigin && isPokiHost(source.hostname) && isPokiHost(resolved.hostname)) {
-      return localPokiOrigin + resolved.pathname + resolved.search + resolved.hash;
+      return localPokiUrl(resolved, localPokiOrigin);
     }
     return '/proxy?url=' + encodeURIComponent(resolved.href) + '&referer=' + encodeURIComponent(source.href);
   } catch { return value; }
@@ -131,31 +143,117 @@ function rewriteHtml(html, base, localPokiOrigin = null) {
 (() => {
   const originalBase = ${JSON.stringify(base)};
   const localPokiOrigin = ${JSON.stringify(localPokiOrigin)};
-  const isPokiHost = (hostname) => /^(www\\.)?poki\\.com$/i.test(hostname || '');
+  // Send the upstream URL to the WARP chrome. The parent verifies both this
+  // iframe's window identity and the local virtual-host origin before accepting it.
+  const reportNavigation = (mode = 'replace', value = null) => {
+    try {
+      let upstream = new URL(originalBase);
+      const current = new URL(location.href);
+      if (localPokiOrigin && (current.hostname === 'poki.localhost' || current.hostname.endsWith('.poki.localhost'))) {
+        upstream = current;
+        // The local virtual host uses WARP's port (for example :8787), but
+        // the upstream Poki URL must use its normal HTTPS port, not that local
+        // development port. Changing protocol alone preserves :8787.
+        upstream.protocol = 'https:';
+        upstream.port = '';
+        upstream.hostname = upstream.hostname === 'poki.localhost'
+          ? 'www.poki.com'
+          : upstream.hostname.slice(0, -'.poki.localhost'.length) + '.poki.com';
+      } else if (value !== null && value !== undefined && String(value)) {
+        const candidate = new URL(String(value), originalBase);
+        if (candidate.pathname === '/proxy' && candidate.searchParams.has('url')) {
+          upstream = new URL(candidate.searchParams.get('url'));
+        } else if (candidate.origin === location.origin) {
+          upstream = new URL(candidate.pathname + candidate.search + candidate.hash, originalBase);
+        } else {
+          upstream = candidate;
+        }
+      }
+      if (!['http:', 'https:'].includes(upstream.protocol)) return;
+      parent.postMessage({ type: 'warp:navigate', url: upstream.href, mode }, '*');
+    } catch { /* A URL that cannot be reported must not interrupt the site. */ }
+  };
+  const originalPushState = history.pushState.bind(history);
+  history.pushState = function(state, title, url) {
+    const result = originalPushState(state, title, url);
+    reportNavigation('push', url == null ? null : url);
+    return result;
+  };
+  const originalReplaceState = history.replaceState.bind(history);
+  history.replaceState = function(state, title, url) {
+    const result = originalReplaceState(state, title, url);
+    reportNavigation('replace', url == null ? null : url);
+    return result;
+  };
+  addEventListener('popstate', () => reportNavigation('replace', location.href));
+  addEventListener('hashchange', () => reportNavigation('push', location.href));
+  addEventListener('load', () => reportNavigation('replace'));
+  reportNavigation('replace');
+  const isPokiHost = (hostname) => {
+    const host = String(hostname || '').toLowerCase();
+    return host === 'poki.com' || host === 'www.poki.com' || host.endsWith('.poki.com');
+  };
+  const isLocalPokiHost = (hostname) => {
+    const host = String(hostname || '').toLowerCase();
+    return host === 'poki.localhost' || host.endsWith('.poki.localhost');
+  };
+  const localPokiUrl = (u) => {
+    const local = new URL(localPokiOrigin);
+    const host = u.hostname.toLowerCase();
+    local.hostname = host === 'poki.com' || host === 'www.poki.com'
+      ? 'poki.localhost'
+      : host.slice(0, -'.poki.com'.length) + '.poki.localhost';
+    local.pathname = u.pathname;
+    local.search = u.search;
+    local.hash = u.hash;
+    return local.href;
+  };
   const proxy = (value) => {
-    const raw = typeof value === 'string' ? value : value.url;
+    const raw = typeof value === 'string' ? value
+      : value instanceof URL ? value.href
+      : value instanceof Request ? value.url
+      : value && typeof value.url === 'string' ? value.url
+      : null;
     if (typeof raw !== 'string' || /^(#|data:|blob:|javascript:|mailto:|tel:|about:)/i.test(raw)) return value;
     try {
-      // Avoid wrapping an already-proxied local URL a second time.
+      // Avoid wrapping an already-proxied URL, including URLs on sibling
+      // Poki virtual hosts and URL objects passed to fetch().
       const local = new URL(raw, location.href);
-      if (localPokiOrigin && local.origin === localPokiOrigin) return raw;
+      const localOrigin = localPokiOrigin ? new URL(localPokiOrigin) : null;
+      if (localOrigin && isLocalPokiHost(local.hostname) &&
+          local.protocol === localOrigin.protocol && local.port === localOrigin.port) return raw;
       if (local.origin === location.origin && local.pathname === '/proxy' &&
           local.searchParams.has('url')) return raw;
-      const u = new URL(raw, originalBase);
+      // Reinterpret local-origin URL objects against the upstream page, not WARP itself.
+      const u = local.origin === location.origin
+        ? new URL(local.pathname + local.search + local.hash, originalBase)
+        : new URL(raw, originalBase);
       if (u.protocol !== 'http:' && u.protocol !== 'https:') return value;
       if (localPokiOrigin && isPokiHost(new URL(originalBase).hostname) && isPokiHost(u.hostname)) {
-        return localPokiOrigin + u.pathname + u.search + u.hash;
+        return localPokiUrl(u);
       }
       return '/proxy?url=' + encodeURIComponent(u.href) + '&referer=' + encodeURIComponent(originalBase);
     } catch { return value; }
   };
+  const proxySrcset = (value) => String(value).split(/,\\s+/).map((entry) => {
+    const parts = entry.trim().split(/\\s+/);
+    if (parts[0]) parts[0] = proxy(parts[0]);
+    return parts.join(' ');
+  }).join(', ');
+  const rewriteCssValue = (value) => String(value).replace(/url\\(\\s*(['"]?)(.*?)\\1\\s*\\)/gi, (whole, quote, raw) => {
+    const url = raw.trim();
+    if (!url || /^(data:|blob:|#|about:|javascript:)/i.test(url)) return whole;
+    return 'url("' + String(proxy(url)).replace(/"/g, '%22') + '")';
+  });
   // Static HTML rewriting cannot see URLs assigned later by app code. Poki
   // creates some icons/images dynamically, so route URL attributes through the
   // same proxy when code uses setAttribute() or common DOM URL properties.
   const oldSetAttribute = Element.prototype.setAttribute;
   Element.prototype.setAttribute = function(name, value) {
-    if (/^(src|href|poster|action|formaction|data)$/i.test(name) && typeof value === 'string') {
-      value = proxy(value);
+    if (typeof value === 'string') {
+      if (/^srcset$/i.test(name)) value = proxySrcset(value);
+      else if (/^style$/i.test(name)) value = rewriteCssValue(value);
+      else if (/^(src|href|poster|action|formaction|data)$/i.test(name)) value = proxy(value);
     }
     return oldSetAttribute.call(this, name, value);
   };
@@ -165,10 +263,16 @@ function rewriteHtml(html, base, localPokiOrigin = null) {
     if (!descriptor || !descriptor.get || !descriptor.set || !descriptor.configurable) return;
     Object.defineProperty(prototype, property, {
       ...descriptor,
-      set(value) { return descriptor.set.call(this, typeof value === 'string' ? proxy(value) : value); }
+      set(value) {
+        if (typeof value !== 'string') return descriptor.set.call(this, value);
+        const next = property === 'srcset' ? proxySrcset(value) : proxy(value);
+        return descriptor.set.call(this, next);
+      }
     });
   };
   patchUrlProperty(window.HTMLImageElement && HTMLImageElement.prototype, 'src');
+  patchUrlProperty(window.HTMLImageElement && HTMLImageElement.prototype, 'srcset');
+  patchUrlProperty(window.HTMLSourceElement && HTMLSourceElement.prototype, 'srcset');
   patchUrlProperty(window.HTMLScriptElement && HTMLScriptElement.prototype, 'src');
   patchUrlProperty(window.HTMLLinkElement && HTMLLinkElement.prototype, 'href');
   patchUrlProperty(window.HTMLSourceElement && HTMLSourceElement.prototype, 'src');
@@ -176,6 +280,33 @@ function rewriteHtml(html, base, localPokiOrigin = null) {
   patchUrlProperty(window.HTMLMediaElement && HTMLMediaElement.prototype, 'poster');
   patchUrlProperty(window.HTMLAnchorElement && HTMLAnchorElement.prototype, 'href');
   patchUrlProperty(window.HTMLFormElement && HTMLFormElement.prototype, 'action');
+  const oldSetProperty = CSSStyleDeclaration.prototype.setProperty;
+  CSSStyleDeclaration.prototype.setProperty = function(name, value, priority) {
+    return oldSetProperty.call(this, name, rewriteCssValue(value), priority);
+  };
+  // Property assignments such as element.style.backgroundImage bypass
+  // setAttribute()/setProperty(); observe the resulting style attribute too.
+  const rewriteDynamicNode = (node) => {
+    if (!(node instanceof Element)) return;
+    for (const name of ['srcset', 'style']) {
+      if (!node.hasAttribute(name)) continue;
+      const value = node.getAttribute(name);
+      const next = name === 'srcset' ? proxySrcset(value) : rewriteCssValue(value);
+      if (next !== value) node.setAttribute(name, next);
+    }
+    if (node.querySelectorAll) node.querySelectorAll('[srcset],[style]').forEach(rewriteDynamicNode);
+  };
+  new MutationObserver((records) => {
+    for (const record of records) {
+      if (record.type === 'attributes') rewriteDynamicNode(record.target);
+      for (const node of record.addedNodes || []) rewriteDynamicNode(node);
+    }
+  }).observe(document.documentElement, {
+    subtree: true,
+    childList: true,
+    attributes: true,
+    attributeFilter: ['srcset', 'style']
+  });
   const oldFetch = window.fetch.bind(window);
   window.fetch = (input, init) => {
     const next = proxy(input);
@@ -207,6 +338,19 @@ function rewriteHtml(html, base, localPokiOrigin = null) {
         !destination.searchParams.has('url')) return;
     event.preventDefault();
     event.stopImmediatePropagation();
+    // A rewritten Poki game link must become a path-preserving Poki virtual-host
+    // URL. Navigating to /proxy?url=... on the virtual host makes Poki receive
+    // the literal /proxy route, which displays "Sorry! ... has moved" instead
+    // of opening the selected game.
+    if (localPokiOrigin) {
+      try {
+        const upstream = new URL(destination.searchParams.get('url'));
+        if (isPokiHost(upstream.hostname)) {
+          location.assign(localPokiUrl(upstream));
+          return;
+        }
+      } catch { /* Fall back to the original local proxy navigation below. */ }
+    }
     location.assign(destination.pathname + destination.search + destination.hash);
   }, true);
 })();
@@ -235,14 +379,25 @@ async function readRequestBody(req, limit) {
 }
 
 async function handlePokiPathProxy(req, res) {
+  const requestHost = String(req.headers.host || '').split(':')[0].toLowerCase();
+  let upstreamHost;
+  if (requestHost === 'poki.localhost') {
+    upstreamHost = 'www.poki.com';
+  } else if (requestHost.endsWith('.poki.localhost')) {
+    upstreamHost = requestHost.slice(0, -'.localhost'.length) + '.com';
+  } else {
+    res.writeHead(400, { 'Content-Type': 'text/plain; charset=utf-8' }).end('Invalid Poki host.');
+    return;
+  }
+
   let target;
   try {
-    target = new URL(req.url, 'https://www.poki.com');
+    target = new URL(req.url, 'https://' + upstreamHost);
   } catch {
     res.writeHead(400, { 'Content-Type': 'text/plain; charset=utf-8' }).end('Invalid Poki path.');
     return;
   }
-  if (target.origin !== 'https://www.poki.com') {
+  if (target.origin !== 'https://' + upstreamHost || !isPokiHost(target.hostname)) {
     res.writeHead(400, { 'Content-Type': 'text/plain; charset=utf-8' }).end('Invalid Poki path.');
     return;
   }
@@ -310,7 +465,9 @@ async function handleWebProxy(req, res) {
     }
     const location = upstream.headers.get('location');
     const requestHost = String(req.headers.host || '').split(':')[0].toLowerCase();
-    const localPokiOrigin = requestHost === 'poki.localhost' ? 'http://' + req.headers.host : null;
+    const localPokiOrigin = requestHost === 'poki.localhost' || requestHost.endsWith('.poki.localhost')
+      ? 'http://' + req.headers.host
+      : null;
     if (location) headers.Location = proxyUrl(location, target, localPokiOrigin);
     if (upstream.status === 204 || upstream.status === 304) {
       res.writeHead(upstream.status, headers).end();

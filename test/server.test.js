@@ -7,7 +7,7 @@ const net = require('node:net');
 const WebSocket = require('ws');
 const { server: wisp } = require('@mercuryworkshop/wisp-js/server');
 const { createWarpServer, isLocalOrigin } = require('../src/server');
-const { rewriteHtml, rewriteCss } = require('../src/web-proxy');
+const { rewriteHtml, rewriteCss, proxyUrl } = require('../src/web-proxy');
 
 async function listen(server) {
   await new Promise((resolve, reject) => {
@@ -114,8 +114,13 @@ test('GET /browser-test serves the WARP-proxied browser view', async () => {
     assert.ok(response.headers['content-type'].startsWith('text/html'));
     assert.ok(response.headers['content-security-policy'].includes("frame-src 'self'"));
     assert.ok(response.headers['content-security-policy'].includes('http://poki.localhost:' + new URL(baseUrl).port), 'The frame policy must permit the local path-preserving Poki host');
+    assert.ok(response.headers['content-security-policy'].includes('http://*.poki.localhost:' + new URL(baseUrl).port), 'The frame policy must permit path-preserving Poki subdomains');
     assert.ok(response.body.includes('<iframe id="frame"'));
     assert.ok(response.body.includes('id="address"'));
+    assert.ok(response.body.includes("event.source !== frame.contentWindow"), 'Address reports must be tied to the current iframe');
+    assert.ok(response.body.includes("event.data.type !== 'warp:navigate'"), 'Address reports must validate the message shape');
+    assert.ok(response.body.includes("syncAddress(current.searchParams.get('url'), 'replace')"), 'The address bar must unwrap proxy URLs to the full destination');
+    assert.ok(response.body.includes("event.data.mode === 'push' ? 'push' : 'replace'"), 'Reported SPA navigation must update address-bar history');
     assert.ok(response.body.includes('/proxy?url=https%3A%2F%2Fexample.com%2F'));
     assert.ok(response.body.includes("const localPoki = new URL(location.protocol + '//poki.localhost:' + location.port)"), 'Poki must use a path-preserving local origin');
     assert.ok(response.body.includes('frame.src = localPoki.href'), 'Poki routes must remain inside the WARP iframe');
@@ -151,8 +156,14 @@ test('browser proxy rewrites common HTML and CSS resource URLs', () => {
   assert.ok(html.includes('window.fetch ='));
   assert.ok(html.includes('new Request(next, input)'), 'fetch Request objects must retain their method, headers, and body');
   assert.ok(html.includes('Element.prototype.setAttribute'), 'dynamically assigned asset URLs must be proxied');
+  assert.ok(html.includes('value instanceof URL'), 'URL objects passed to fetch must be proxied');
+  assert.ok(html.includes('proxySrcset'), 'dynamically assigned srcset candidates must be proxied');
+  assert.ok(html.includes('rewriteCssValue'), 'dynamically assigned CSS URLs must be proxied');
+  assert.ok(html.includes('new MutationObserver'), 'style and srcset mutations must be observed');
   assert.ok(html.includes('HTMLImageElement') && html.includes('HTMLLinkElement'), 'image and icon property URLs must be proxied');
   assert.ok(html.includes('event.stopImmediatePropagation()'), 'proxy navigation must run before client-side routers inspect rewritten links');
+  assert.ok(html.includes('location.assign(localPokiUrl(upstream))'), 'Poki game links must navigate to their local virtual-host route, not the upstream /proxy endpoint');
+  assert.ok(html.includes('literal /proxy route'), 'Poki click handling must guard against the moved-game page caused by proxy-path navigation');
   assert.ok(!html.includes('<base href=') && !html.includes('<base target='), 'base tags should be removed so relative URLs do not escape the proxy');
   const css = rewriteCss('body{background:url("../img/bg.png")} @import "theme.css";', 'https://example.com/css/site.css');
   assert.ok(css.includes('/proxy?url=https%3A%2F%2Fexample.com%2Fimg%2Fbg.png'));
@@ -167,8 +178,29 @@ test('Poki URLs preserve SPA paths on the local virtual host', () => {
   );
   assert.ok(html.includes('href="http://poki.localhost:8787/en/games/example"'), 'Poki navigation paths must remain visible to its SPA router');
   assert.ok(html.includes('const localPokiOrigin = "http://poki.localhost:8787"'), 'The bootstrap must know the local virtual origin');
+  assert.ok(html.includes("host.endsWith('.poki.com')"), 'Dynamic URL rewriting must recognize Poki subdomains');
+  assert.ok(html.includes("host.slice(0, -'.poki.com'.length) + '.poki.localhost'"), 'Dynamic URLs must retain the corresponding local subdomain');
+  assert.ok(html.includes("type: 'warp:navigate'"), 'Proxied pages must report their visible upstream URL');
+  assert.ok(html.includes("upstream.port = '';"), 'Reported upstream Poki URLs must drop WARP’s local port');
+  assert.ok(html.includes("upstream.hostname = upstream.hostname === 'poki.localhost'"), 'Local Poki hosts must be mapped back to the upstream hostname');
+  assert.ok(html.includes('history.pushState = function'), 'SPA pushState routes must be reported');
+  assert.ok(html.includes("addEventListener('popstate'"), 'Back/forward SPA navigation must be reported');
+  assert.ok(html.includes("addEventListener('hashchange'"), 'Hash route changes must be reported');
   const css = rewriteCss('body{background:url("/assets/bg.webp")}', 'https://www.poki.com/css/site.css', 'http://poki.localhost:8787');
   assert.ok(css.includes('http://poki.localhost:8787/assets/bg.webp'), 'Same-origin Poki CSS assets must preserve their paths');
+
+  assert.equal(
+    proxyUrl('https://games.poki.com/assets/game.wasm?build=42', 'https://www.poki.com/en/games/example', 'http://poki.localhost:8787'),
+    'http://games.poki.localhost:8787/assets/game.wasm?build=42',
+    'Poki subdomain assets must keep their original hostname, path, and query'
+  );
+  const subdomainHtml = rewriteHtml(
+    '<html><body><a href="https://games.poki.com/en/games/example?mode=full">game</a><img src="https://games.poki.com/assets/icon.svg"></body></html>',
+    'https://www.poki.com/',
+    'http://poki.localhost:8787'
+  );
+  assert.ok(subdomainHtml.includes('href="http://games.poki.localhost:8787/en/games/example?mode=full"'), 'Cross-subdomain game routes must preserve path and query');
+  assert.ok(subdomainHtml.includes('src="http://games.poki.localhost:8787/assets/icon.svg"'), 'Cross-subdomain icons must preserve their local virtual host');
 });
 
 test('HTML URL rewriting leaves JavaScript source untouched', () => {

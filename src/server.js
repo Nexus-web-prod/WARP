@@ -87,7 +87,7 @@ function createWarpServer() {
       const localPort = new URL('http://' + (req.headers.host || ('127.0.0.1:' + PORT))).port || PORT;
       res.writeHead(200, {
         'Content-Type': 'text/html; charset=utf-8',
-        'Content-Security-Policy': "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self' ws:; frame-src 'self' http://poki.localhost:" + localPort
+        'Content-Security-Policy': "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self' ws:; frame-src 'self' http://poki.localhost:" + localPort + " http://*.poki.localhost:" + localPort
       });
       res.end(`<!doctype html>
 <html lang="en">
@@ -135,6 +135,29 @@ button:disabled{opacity:.45;cursor:default}
   const frame = document.getElementById('frame');
   const history = [];
   let index = -1;
+  let lastFrameReportAt = 0;
+
+  function syncAddress(value, mode = 'replace') {
+    let url;
+    try {
+      url = new URL(value);
+      if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) return;
+    } catch { return; }
+    const fullUrl = url.href;
+    address.value = fullUrl;
+    if (mode === 'push' && history[index] !== fullUrl) {
+      history.splice(index + 1);
+      history.push(fullUrl);
+      index = history.length - 1;
+    } else if (index >= 0) {
+      history[index] = fullUrl;
+    } else {
+      history.push(fullUrl);
+      index = 0;
+    }
+    document.getElementById('back').disabled = index <= 0;
+    document.getElementById('forward').disabled = index >= history.length - 1;
+  }
 
   function normalize(value) {
     let text = value.trim();
@@ -164,12 +187,16 @@ button:disabled{opacity:.45;cursor:default}
     address.value = url;
     const parsed = new URL(url);
     const hostname = parsed.hostname.toLowerCase();
-    // Poki requires path-preserving SPA routes. Route it through a dedicated
-    // localhost virtual host so its iframe sees /en/games/... while WARP strips
-    // Poki's upstream frame-ancestors policy. Do not open external tabs.
-    const isPoki = hostname === 'poki.com' || hostname === 'www.poki.com';
+    // Keep every Poki subdomain on a matching local virtual host. Game launches
+    // can cross from www.poki.com to another *.poki.com host; sending those
+    // routes through /proxy changes the origin/path the game's router expects.
+    // Never open external tabs.
+    const isPoki = hostname === 'poki.com' || hostname === 'www.poki.com' || hostname.endsWith('.poki.com');
     if (isPoki) {
       const localPoki = new URL(location.protocol + '//poki.localhost:' + location.port);
+      localPoki.hostname = hostname === 'poki.com' || hostname === 'www.poki.com'
+        ? 'poki.localhost'
+        : hostname.slice(0, -'.poki.com'.length) + '.poki.localhost';
       localPoki.pathname = parsed.pathname;
       localPoki.search = parsed.search;
       localPoki.hash = parsed.hash;
@@ -185,6 +212,52 @@ button:disabled{opacity:.45;cursor:default}
     document.getElementById('back').disabled = index <= 0;
     document.getElementById('forward').disabled = index >= history.length - 1;
   }
+
+  // Proxied documents report their upstream URL; only accept messages from this
+  // iframe and from this local WARP origin or its same-port Poki virtual hosts.
+  window.addEventListener('message', (event) => {
+    if (event.source !== frame.contentWindow || !event.data ||
+        event.data.type !== 'warp:navigate' || typeof event.data.url !== 'string' ||
+        event.data.url.length > 8192) return;
+    let source;
+    let destination;
+    try {
+      source = new URL(event.origin);
+      destination = new URL(event.data.url);
+    } catch { return; }
+    const localHost = (host) => host === 'localhost' || host === '127.0.0.1' ||
+      host === '[::1]' || host === '::1';
+    const pokiHost = (host) => host === 'poki.localhost' || host.endsWith('.poki.localhost');
+    const localPort = location.port || (location.protocol === 'https:' ? '443' : '80');
+    if (source.port !== localPort ||
+        !(event.origin === location.origin || (source.protocol === location.protocol && pokiHost(source.hostname))) ||
+        !['http:', 'https:'].includes(destination.protocol) ||
+        destination.username || destination.password) return;
+    lastFrameReportAt = Date.now();
+    syncAddress(destination.href, event.data.mode === 'push' ? 'push' : 'replace');
+  });
+
+  frame.addEventListener('load', () => {
+    // Let an injected page report its final upstream URL first. Fall back only
+    // when the response is binary/an error page and no report arrives.
+    const reportAtLoad = lastFrameReportAt;
+    setTimeout(() => {
+      if (lastFrameReportAt !== reportAtLoad || (lastFrameReportAt && Date.now() - lastFrameReportAt < 1000)) return;
+      try {
+        const current = new URL(frame.contentWindow.location.href);
+        if (current.pathname === '/proxy' && current.searchParams.has('url')) {
+          syncAddress(current.searchParams.get('url'), 'replace');
+        } else if (current.hostname === 'poki.localhost' || current.hostname.endsWith('.poki.localhost')) {
+          const upstream = new URL(current.href);
+          upstream.protocol = 'https:';
+          upstream.hostname = current.hostname === 'poki.localhost'
+            ? 'www.poki.com'
+            : current.hostname.slice(0, -'.poki.localhost'.length) + '.poki.com';
+          syncAddress(upstream.href, 'replace');
+        }
+      } catch { /* Poki's virtual host is intentionally cross-origin to the UI. */ }
+    }, 150);
+  });
 
   document.getElementById('go').addEventListener('click', () => navigate(address.value));
   address.addEventListener('keydown', (event) => {
@@ -212,7 +285,7 @@ button:disabled{opacity:.45;cursor:default}
     }
 
     const requestHost = String(req.headers.host || '').split(':')[0].toLowerCase();
-    if (requestHost === 'poki.localhost') {
+    if (requestHost === 'poki.localhost' || requestHost.endsWith('.poki.localhost')) {
       void handlePokiPathProxy(req, res);
       return;
     }
