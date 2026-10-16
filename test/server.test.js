@@ -179,6 +179,8 @@ test('Poki URLs preserve SPA paths on the local virtual host', () => {
   assert.ok(html.includes("host.endsWith('.poki.com')"), 'Dynamic URL rewriting must recognize Poki subdomains');
   assert.ok(html.includes("host.slice(0, -'.poki.com'.length) + '.poki.localhost'"), 'Dynamic URLs must retain the corresponding local subdomain');
   assert.ok(html.includes("type: 'warp:navigate'"), 'Proxied pages must report their visible upstream URL');
+  assert.ok(html.includes("upstream.port = '';"), 'Reported upstream Poki URLs must drop WARP’s local port');
+  assert.ok(html.includes("upstream.hostname = upstream.hostname === 'poki.localhost'"), 'Local Poki hosts must be mapped back to the upstream hostname');
   assert.ok(html.includes('history.pushState = function'), 'SPA pushState routes must be reported');
   assert.ok(html.includes("addEventListener('popstate'"), 'Back/forward SPA navigation must be reported');
   assert.ok(html.includes("addEventListener('hashchange'"), 'Hash route changes must be reported');
