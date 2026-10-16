@@ -347,7 +347,9 @@ async function handleWebProxy(req, res) {
     }
     const location = upstream.headers.get('location');
     const requestHost = String(req.headers.host || '').split(':')[0].toLowerCase();
-    const localPokiOrigin = requestHost === 'poki.localhost' ? 'http://' + req.headers.host : null;
+    const localPokiOrigin = requestHost === 'poki.localhost' || requestHost.endsWith('.poki.localhost')
+      ? 'http://' + req.headers.host
+      : null;
     if (location) headers.Location = proxyUrl(location, target, localPokiOrigin);
     if (upstream.status === 204 || upstream.status === 304) {
       res.writeHead(upstream.status, headers).end();
