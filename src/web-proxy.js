@@ -178,7 +178,10 @@ function rewriteHtml(html, base, localPokiOrigin = null) {
           local.protocol === localOrigin.protocol && local.port === localOrigin.port) return raw;
       if (local.origin === location.origin && local.pathname === '/proxy' &&
           local.searchParams.has('url')) return raw;
-      const u = new URL(raw, originalBase);
+      // Reinterpret local-origin URL objects against the upstream page, not WARP itself.
+      const u = local.origin === location.origin
+        ? new URL(local.pathname + local.search + local.hash, originalBase)
+        : new URL(raw, originalBase);
       if (u.protocol !== 'http:' && u.protocol !== 'https:') return value;
       if (localPokiOrigin && isPokiHost(new URL(originalBase).hostname) && isPokiHost(u.hostname)) {
         return localPokiUrl(u);
