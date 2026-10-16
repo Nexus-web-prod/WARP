@@ -132,8 +132,8 @@ button:disabled{opacity:.45;cursor:default}
   function normalize(value) {
     let text = value.trim();
     if (!text) return null;
-    if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(text)) {
-      text = /^[^\s.]+$/.test(text) && !text.includes('localhost')
+    if (!/^[a-z][a-z0-9+.-]*:\\/\\//i.test(text)) {
+      text = /^[^\\s.]+$/.test(text) && !text.includes('localhost')
         ? 'https://www.google.com/search?q=' + encodeURIComponent(text)
         : 'https://' + text;
     }
