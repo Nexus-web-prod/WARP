@@ -144,12 +144,22 @@ function rewriteHtml(html, base) {
   };
   const oldOpenWindow = window.open;
   window.open = (url, ...args) => oldOpenWindow.call(window, proxy(url), ...args);
+  // React/Vue-style routers inspect anchor.href before the browser navigates.
+  // Since rewritten links point at /proxy?url=..., the app can mistake that
+  // local proxy endpoint for a real game route (Poki then shows "game moved").
+  // Take over these navigations in capture phase before the site's router sees them.
   document.addEventListener('click', (event) => {
+    if (event.defaultPrevented || event.button !== 0 ||
+        event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
     const link = event.target.closest && event.target.closest('a[href]');
-    if (link && !event.defaultPrevented && link.target !== '_blank') {
-      const u = new URL(link.href, location.href);
-      if (u.origin === location.origin && u.pathname === '/proxy') return;
-    }
+    if (!link || link.target === '_blank' || link.hasAttribute('download')) return;
+    let destination;
+    try { destination = new URL(link.href, location.href); } catch { return; }
+    if (destination.origin !== location.origin || destination.pathname !== '/proxy' ||
+        !destination.searchParams.has('url')) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    location.assign(destination.pathname + destination.search + destination.hash);
   }, true);
 })();
 </script>`;
