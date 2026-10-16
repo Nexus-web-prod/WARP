@@ -84,9 +84,10 @@ function createWarpServer() {
     }
 
     if (req.method === 'GET' && pathname === '/browser-test') {
+      const localPort = new URL('http://' + (req.headers.host || ('127.0.0.1:' + PORT))).port || PORT;
       res.writeHead(200, {
         'Content-Type': 'text/html; charset=utf-8',
-        'Content-Security-Policy': "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self' ws:; frame-src 'self' http://poki.localhost:" + PORT
+        'Content-Security-Policy': "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self' ws:; frame-src 'self' http://poki.localhost:" + localPort
       });
       res.end(`<!doctype html>
 <html lang="en">
