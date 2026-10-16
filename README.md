@@ -41,7 +41,7 @@ WARP uses the maintained `@mercuryworkshop/wisp-js` implementation for Wisp v1/v
 - Limit: 64 streams per WebSocket. The optional per-host limit is disabled because Wisp JS 0.5.0 has an object/iterable mismatch in that code path.
 - Common administration/service ports are blocked.
 - Browser WebSocket origins are restricted to localhost by default.
-- The local browser proxy permits public HTTP/HTTPS targets only and rejects private/local hostnames and IP addresses.
+- The local browser proxy permits public HTTP/HTTPS targets only and rejects private/local hostnames and IP addresses. Binary resources stream instead of being fully buffered, so large images and other assets no longer hit the old 20 MB resource cap. Range and conditional requests are forwarded to support media loading and caching.
 - The HTTP service binds to localhost by default.
 
 **Do not bind this development relay to a public interface.** There is no user authentication yet. If remote access is added later, implement authentication, stronger origin policy, and deployment-specific abuse controls first.
