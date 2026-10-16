@@ -92,7 +92,7 @@ test('GET /health reports the Wisp TCP relay capabilities', async () => {
   });
 });
 
-test('unknown HTTP routes return 404', async () => {
+test('GET /browser-test serves the local Wisp TCP diagnostic page', async () => {\n  await withServer(async ({ baseUrl }) => {\n    const response = await get(`${baseUrl}/browser-test`);\n    assert.equal(response.status, 200);\n    assert.match(response.headers['content-type'], /text\\/html/);\n    assert.match(response.body, /Request example\\.com over WARP/);\n    assert.match(response.body, /not a web proxy/);\n    assert.match(response.body, /wisp\\/);\n  });\n});\n\ntest('unknown HTTP routes return 404', async () => {
   await withServer(async ({ baseUrl }) => {
     assert.equal((await get(`${baseUrl}/missing`)).status, 404);
   });
